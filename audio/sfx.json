@@ -1,0 +1,13 @@
+{
+  "tap":     { "preset": "tap", "pitch": 1.15, "volume": 0.35 },
+  "open":    { "preset": "whoosh", "pitch": 1.4, "volume": 0.25 },
+  "close":   { "preset": "back", "pitch": 1.2, "volume": 0.3 },
+  "like":    { "preset": "pop", "pitch": 1.2, "volume": 0.55 },
+  "fav":     { "preset": "star", "pitch": 1.1, "volume": 0.4 },
+  "success": { "preset": "confirm", "pitch": 1.1, "volume": 0.4 },
+  "delete":  { "preset": "slide", "pitch": 0.9, "volume": 0.35 },
+  "error":   { "preset": "error", "volume": 0.35 },
+  "shutter": { "layers": [ { "wave": "noise", "freq": 7000, "duration": 0.05, "punch": 0.6, "decay": 0.9 }, { "wave": "noise", "freq": 5000, "duration": 0.06, "delay": 0.07, "decay": 0.9, "volume": 0.7 } ], "highpass": 1200, "lowpass": 6000, "volume": 0.4 },
+  "unlock":  { "preset": "unlock", "pitch": 1.3, "volume": 0.4 },
+  "toggle":  { "preset": "toggle", "volume": 0.35 }
+}
