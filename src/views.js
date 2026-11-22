@@ -8,7 +8,7 @@ import {
   setSetting, db, addLog, logIcon, deleteRecords, isVideo, fmtDur, native, mix, hexToRgb, isNative, isIOS, isStandalone, storage, audio, savePhotos
 } from './core.js';
 import * as A from './actions.js';
-import { startUpload, exportBackup, importBackup, storageInfo } from './io.js';
+import { startUpload, uploadMenu, exportBackup, importBackup, storageInfo } from './io.js';
 import { openViewer, openSlideshow, viewerOpen } from './viewer.js';
 import { showMemberPicker, editMember, deleteMember, lockApp, setupPin, verifyPin } from './members.js';
 import { sync, syncSummary, familyLink, setFamilyCode, startSync, stopSync, validCode, normCode, newCode, resyncNow, relayInfo } from './sync.js';
@@ -635,7 +635,7 @@ function renderAlbum(main) {
     ${list.length ? gridHTML(list) : emptyState('album', 'Album ini masih kosong', 'Unggah foto langsung ke album ini, atau tambahkan dari Galeri.')}`;
   bindGrid(main);
   bindCols(main);
-  $('[data-upalbum]', main).onclick = () => startUpload({ albumId: a.id });
+  $('[data-upalbum]', main).onclick = () => uploadMenu({ albumId: a.id });
   $('[data-addto]', main).onclick = async () => {
     const ids = await A.pickPhotos(`Tambah ke “${a.name}”`, visible().filter(p => p.albumId !== a.id).sort((x, y) => y.uploadedAt - x.uploadedAt), { okLabel: 'Tambahkan' });
     if (ids?.length) await A.moveToAlbum(ids, a.id);
@@ -967,7 +967,7 @@ export function bindChrome() {
     if (t.closest('.modal, .sheet')) return;
     sfx('tap');
     if (t.dataset.go) go(t.dataset.go);
-    else if (t.hasAttribute('data-upload')) startUpload();
+    else if (t.hasAttribute('data-upload')) uploadMenu();
     else if (t.hasAttribute('data-member')) memberMenu();
     else if (t.hasAttribute('data-more')) openMore();
     else if (t.hasAttribute('data-select')) { if (S.selecting) exitSelection(); else enterSelection(); }

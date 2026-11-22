@@ -3,7 +3,7 @@
 // =====================================================================
 import { prepareMedia, guessType, looksLikeMedia } from './media.js';
 import {
-  S, $, esc, icon, uid, openModal, toast, sfx, db, savePhotos, saveAlbum, saveMember, addLog, emit, pickFiles,
+  S, $, esc, icon, uid, openModal, actionSheet, toast, sfx, db, savePhotos, saveAlbum, saveMember, addLog, emit, pickFiles,
   decodeImage, makeThumb, sha256, isNative, blobToDataURL, dataURLToBlob, saveBlob, writeChunks, shareUri, fmtSize,
   albumById, getBlob, sleep, isVideoFile, videoType, videoInfo, quickHash, fmtSize as _fs
 } from './core.js';
@@ -12,8 +12,11 @@ const MAX_VIDEO = 1024 * 1024 * 1024; // 1 GB per video
 // ----------------------------- Upload --------------------------------
 // fromFiles=false → the phone's own Photos/Gallery picker (only plain image/video types do that);
 // fromFiles=true → file manager, for RAW/TIFF/other files not shown in the photo picker.
-export async function startUpload({ albumId = null, fromFiles = false } = {}) {
-  const picked = await pickFiles('fileInput', { accept: fromFiles ? '' : 'image/*,video/*', multiple: true });
+// only='image'|'video': Android opens its Gallery/photo picker only when ONE media type is asked for
+// (asking for photos+videos together makes it fall back to the Files app).
+export async function startUpload({ albumId = null, fromFiles = false, only = null } = {}) {
+  const accept = fromFiles ? '' : only === 'image' ? 'image/*' : only === 'video' ? 'video/*' : 'image/*,video/*';
+  const picked = await pickFiles('fileInput', { accept, multiple: true });
   const files = picked.filter(looksLikeMedia);
   if (picked.length > files.length) toast(`${picked.length - files.length} file bukan foto/video dilewati`, { duration: 3500 });
   if (!files.length) return;
@@ -99,6 +102,17 @@ export async function uploadFiles(files, { albumId = null } = {}) {
   else if (converted) toast(`${converted} foto HEIC/RAW/TIFF dikonversi agar bisa tampil`, { duration: 3500 });
   emit('change');
   return added;
+}
+
+// Upload button: iPhone/desktop pick photos+videos together; Android gets Foto / Video / File choices.
+export function uploadMenu({ albumId = null } = {}) {
+  const android = /Android/i.test(navigator.userAgent);
+  if (!android) return startUpload({ albumId });
+  return actionSheet('Unggah dari…', [
+    { icon: 'image', label: 'Foto (Galeri)', fn: () => startUpload({ albumId, only: 'image' }) },
+    { icon: 'video', label: 'Video (Galeri)', color: 'pink', fn: () => startUpload({ albumId, only: 'video' }) },
+    { icon: 'album', label: 'File lain', color: 'yellow', fn: () => startUpload({ albumId, fromFiles: true }) }
+  ], { grid: true });
 }
 
 // ----------------------------- Backup --------------------------------
