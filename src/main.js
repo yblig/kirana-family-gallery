@@ -1,3 +1,4 @@
+import './polyfills.js';
 // =====================================================================
 // main.js — Init · keyboard shortcuts · back handling · app lock · PWA
 // =====================================================================
@@ -8,9 +9,9 @@ import { render, bindChrome, go, goBack, applyTheme, autoPurge, focusSearch, fee
 import { ensureDefaultMembers, showMemberPicker, lockApp } from './members.js';
 import { startUpload, uploadFiles } from './io.js';
 import { viewerOpen } from './viewer.js';
-import { startSync, setFamilyCode, newCode, codeFromUrl, updateUrl } from './sync.js';
-import { openFamilySync } from './views.js';
-import { confirmDialog, openModal, icon } from './core.js';
+import { startSync, setFamilyCode, newCode, codeFromUrl, updateUrl, resyncNow } from './sync.js';
+import { openFamilySync, askJoinCode } from './views.js';
+import { confirmDialog, openModal, icon, on } from './core.js';
 import { setSetting } from './core.js';
 
 async function init() {
@@ -58,10 +59,14 @@ async function init() {
   let hiddenAt = 0;
   native.onPause(() => { hiddenAt = Date.now(); });
   native.onResume(() => {
+    // iPhone kills network connections in the background: reconnect on return.
+    if (hiddenAt && Date.now() - hiddenAt > 5000) startSync();
     if (S.settings.pin && S.settings.lockOnResume && !inExternal() && hiddenAt && Date.now() - hiddenAt > 30000) lockApp();
     hiddenAt = 0;
   });
 
+  window.addEventListener('online', () => startSync());
+  on('needMember', () => { toast('Profil yang kamu pakai dihapus oleh keluarga. Pilih profil lagi.'); showMemberPicker({ required: true }); });
   if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./sw.js').catch(e => console.warn('sw', e));
   }
@@ -116,17 +121,28 @@ async function setupFamily() {
       return;
     }
   }
-  if (!S.settings.familyCode) setSetting('familyCode', newCode());
+  if (!S.settings.familyCode) {
+    // Ask instead of silently creating a code, so a second phone doesn't start its own family.
+    const choice = await new Promise(resolve => {
+      let v = 'new';
+      openModal({
+        title: 'Sambungkan HP keluarga 👨‍👩‍👧', dismissable: false,
+        body: `<p class="msg">Apakah sudah ada anggota keluarga yang memakai Kirana Gallery?</p>
+          <p class="hint" style="margin-top:8px">Kalau sudah, minta <b>kode keluarga</b> atau link dari HP mereka (Lainnya → Sinkron) supaya foto & profil kalian tersambung.</p>`,
+        actions: [{ label: 'Saya yang pertama', fn: () => { v = 'new'; } }, { label: 'Punya kode', cls: 'primary', fn: () => { v = 'join'; } }],
+        onClose: () => resolve(v)
+      });
+    });
+    if (choice === 'join' && await askJoinCode()) return;
+    setSetting('familyCode', newCode());
+    setSetting('syncIntro', true);
+    updateUrl();
+    await startSync();
+    setTimeout(openFamilySync, 300);
+    return;
+  }
   updateUrl();
   await startSync();
-  if (!S.settings.syncIntro) {
-    setSetting('syncIntro', true);
-    setTimeout(() => openModal({
-      title: 'Sambungkan HP keluarga 👨‍👩‍👧',
-      body: `<p class="msg">Supaya foto dari Bapak, Mama & kamu saling muncul di semua HP, kirim link keluarga ini ke mereka (cukup sekali). Tanpa daftar akun, gratis.</p>`,
-      actions: [{ label: 'Nanti' }, { label: 'Kirim link', icon: 'send', cls: 'primary', fn: () => setTimeout(openFamilySync, 250) }]
-    }), 400);
-  }
 }
 
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); window.__installPrompt = e; });

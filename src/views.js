@@ -11,7 +11,7 @@ import * as A from './actions.js';
 import { startUpload, exportBackup, importBackup, storageInfo } from './io.js';
 import { openViewer, openSlideshow, viewerOpen } from './viewer.js';
 import { showMemberPicker, editMember, deleteMember, lockApp, setupPin, verifyPin } from './members.js';
-import { sync, syncSummary, familyLink, setFamilyCode, startSync, stopSync, validCode, normCode, newCode } from './sync.js';
+import { sync, syncSummary, familyLink, setFamilyCode, startSync, stopSync, validCode, normCode, newCode, resyncNow, relayInfo } from './sync.js';
 
 const NAV = [
   { id: 'feed', label: 'Feed', icon: 'feed', key: 'F' },
@@ -89,26 +89,41 @@ function refreshPills() {
 }
 on('sync', refreshPills);
 
+function relayText() {
+  const r = relayInfo();
+  return r.total ? `Server perantara: ${r.open}/${r.total} tersambung` : 'Server perantara: menyambung…';
+}
 export function openFamilySync() {
   sfx('open');
   const code = S.settings.familyCode;
   const md = openModal({
     title: 'Sinkron Keluarga',
-    body: `<p class="msg" style="margin-bottom:12px">Semua HP dengan <b>kode keluarga</b> yang sama otomatis saling kirim foto, album, profil & log — langsung antar HP, tanpa server & gratis.</p>
-      <div class="code-box"><small>Kode keluarga</small><b>${esc(code || '—')}</b></div>
+    body: `<p class="msg" style="margin-bottom:12px">Semua HP dengan <b>kode keluarga yang sama</b> otomatis saling kirim foto, album, profil anggota & log — langsung antar HP, tanpa server & gratis.</p>
+      <div class="code-box"><small>Kode keluarga HP ini</small><b>${esc(code || '—')}</b></div>
       <div class="sync-status"><span class="dot ${sync.status}"></span><span id="syncStatus">${esc(syncSummary())}</span></div>
+      <div class="hint" id="relayStatus" style="margin:4px 0 0 18px">${esc(relayText())}</div>
       <div class="stack" style="gap:8px;margin-top:12px">
-        <button class="btn primary block" data-sx="share">${icon('send', 'sm')} Kirim link ke keluarga</button>
+        <button class="btn primary block" data-sx="now">${icon('rotate', 'sm')} Sinkron sekarang</button>
+        <button class="btn block" data-sx="share">${icon('send', 'sm')} Kirim link ke keluarga</button>
         <button class="btn block" data-sx="copy">${icon('copy', 'sm')} Salin kode</button>
         <button class="btn block" data-sx="join">${icon('users', 'sm')} Masukkan kode dari HP lain</button>
         <button class="btn block ghost" data-sx="toggle">${S.settings.syncOn ? 'Matikan sinkron di HP ini' : 'Nyalakan sinkron'}</button>
       </div>
-      <p class="hint" style="margin-top:12px">💡 Foto terkirim saat HP keluarga <b>sama-sama membuka aplikasi</b> ini (paling cepat di Wi-Fi rumah yang sama). Di iPhone aplikasi web tidak bisa sinkron di latar belakang.</p>`
+      <div class="card" style="margin-top:12px;box-shadow:none;background:var(--surface-2)">
+        <b style="display:block;margin-bottom:6px">Belum tersambung? Cek ini:</b>
+        <div class="hint" style="line-height:1.55">1. <b>Kode harus sama persis</b> di semua HP. Kalau beda, ketuk “Masukkan kode dari HP lain” di salah satu HP.<br>
+        2. Buka aplikasi ini di <b>kedua HP pada waktu yang sama</b>, tunggu ±30 detik sampai titik jadi hijau.<br>
+        3. Paling lancar di <b>Wi-Fi yang sama</b>. Di iPhone, buka dari ikon di Layar Utama (bukan dari WhatsApp).</div>
+      </div>`
   });
+  const tick = setInterval(() => { const r = $('#relayStatus', md.el); if (!r || !document.body.contains(r)) { clearInterval(tick); return; } r.textContent = relayText(); const d = $('.sync-status .dot', md.el); if (d) d.className = 'dot ' + sync.status; }, 1500);
   $$('[data-sx]', md.el).forEach(b => b.onclick = async () => {
     sfx('tap');
     const a = b.dataset.sx;
-    if (a === 'share') {
+    if (a === 'now') {
+      if (resyncNow()) toast('Menyinkronkan dengan HP keluarga…', { type: 'success' });
+      else { await startSync(); toast('Menyambung ulang… pastikan HP keluarga juga sedang membuka aplikasi'); }
+    } else if (a === 'share') {
       const text = `Yuk gabung galeri foto keluarga Kirana! Buka link ini di Safari/Chrome, lalu "Add to Home Screen":\n${familyLink()}\n(Kode keluarga: ${S.settings.familyCode})`;
       if (navigator.share) { try { await navigator.share({ title: 'Kirana Family Gallery', text }); } catch { /* cancelled */ } }
       else if (await copyText(text)) toast('Link disalin — tempel di WhatsApp keluarga', { type: 'success' });
@@ -116,17 +131,21 @@ export function openFamilySync() {
       if (await copyText(S.settings.familyCode)) toast('Kode disalin', { type: 'success' });
     } else if (a === 'join') {
       md.close();
-      const v = await promptDialog('Gabung keluarga', { label: 'Kode keluarga dari HP lain', placeholder: 'ABCD-1234', okLabel: 'Gabung', maxLength: 12, hint: 'Lihat kodenya di HP keluarga: menu Lainnya → Sinkron Keluarga.' });
-      if (v == null) return;
-      if (!validCode(v)) { sfx('error'); toast('Kode tidak valid. Contoh: ABCD-1234', { type: 'error' }); return; }
-      await setFamilyCode(normCode(v));
-      sfx('success'); toast('Tergabung! Mencari HP keluarga…', { type: 'success' }); render();
+      await askJoinCode();
     } else if (a === 'toggle') {
       setSetting('syncOn', !S.settings.syncOn);
       if (S.settings.syncOn) startSync(); else stopSync();
       md.close(); render();
     }
   });
+}
+export async function askJoinCode() {
+  const v = await promptDialog('Gabung keluarga', { label: 'Kode keluarga dari HP lain', placeholder: 'ABCD-1234', okLabel: 'Gabung', maxLength: 12, hint: 'Lihat kodenya di HP keluarga: Lainnya → Sinkron.' });
+  if (v == null) return false;
+  if (!validCode(v)) { sfx('error'); toast('Kode tidak valid. Contoh: ABCD-1234', { type: 'error' }); return false; }
+  await setFamilyCode(normCode(v));
+  sfx('success'); toast('Tergabung! Buka aplikasi di HP keluarga juga supaya tersambung.', { type: 'success', duration: 4000 }); render();
+  return true;
 }
 
 function topbarHTML(title, extra = '') {

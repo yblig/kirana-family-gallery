@@ -6,7 +6,7 @@
 // Conflicts: last write wins per record (updatedAt); permanent deletes
 // travel as tombstones.
 // =====================================================================
-import { joinRoom } from 'trystero';
+import { joinRoom, getRelaySockets } from 'trystero';
 import {
   S, db, emit, hooks, savePhotos, saveAlbum, saveMember, removePhotosForever, deleteRecords, getBlob, photoById,
   decodeImage, makeThumb, sha256, setSetting, debounce, toast
@@ -15,7 +15,7 @@ import {
 const APP_ID = 'yblig.kirana-family-gallery.v1';
 const ALPH = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-export const sync = { status: 'off', peers: 0, receiving: 0, queued: 0, sent: 0, lastSync: 0 };
+export const sync = { status: 'off', peers: 0, receiving: 0, queued: 0, sent: 0, lastSync: 0, error: '' };
 let room = null, A = null;
 const peers = new Set();
 const queue = [];          // [{id, peerId}]
@@ -38,35 +38,55 @@ function setStatus(st) { sync.status = st; sync.peers = peers.size; notify(); }
 // ---------------------------------------------------------------- room
 export async function startSync() {
   await stopSync();
+  sync.error = '';
   if (!S.settings.familyCode || !S.settings.syncOn) { setStatus('off'); return; }
   if (!window.RTCPeerConnection) { setStatus('unsupported'); return; }
   try {
     const roomId = (await sha256('kfg-room:' + S.settings.familyCode)).slice(0, 24);
-    room = joinRoom({ appId: APP_ID, password: 'kfg:' + S.settings.familyCode }, roomId);
-  } catch (e) { console.warn('sync join', e); setStatus('error'); return; }
-  A = {
-    manifest: room.makeAction('manifest'),
-    meta: room.makeAction('meta'),
-    blob: room.makeAction('blob', { kind: 'request' })
-  };
-  setStatus('searching');
-  room.onPeerJoin(({ peerId }) => {
-    peers.add(peerId); setStatus('connected');
-    A.manifest.send(manifest(), { target: peerId }).catch(() => {});
-  });
-  room.onPeerLeave(({ peerId }) => {
-    peers.delete(peerId);
-    for (let i = queue.length - 1; i >= 0; i--) if (queue[i].peerId === peerId) { missing.add(queue[i].id); queue.splice(i, 1); }
-    setStatus(peers.size ? 'connected' : 'searching');
-  });
-  room.onError?.(e => console.warn('sync room', e));
-  A.manifest.onMessage((m, { peerId }) => onManifest(m, peerId).catch(e => console.warn('manifest', e)));
-  A.meta.onMessage((m, { peerId }) => applyMeta(m, peerId).catch(e => console.warn('meta', e)));
-  A.blob.onRequest(async req => {
-    const b = req && req.id ? await getBlob(req.id) : null;
-    if (b) { sync.sent++; notify(); }
-    return b || new Uint8Array(0);
-  });
+    // more relays = better chance both phones meet even if some public relays are down
+    room = joinRoom({ appId: APP_ID, password: 'kfg:' + S.settings.familyCode, relayConfig: { redundancy: 10, warnOnRelayFailure: false } }, roomId);
+    A = {
+      manifest: room.makeAction('manifest'),
+      meta: room.makeAction('meta'),
+      blob: room.makeAction('blob', { kind: 'request' })
+    };
+    setStatus('searching');
+    room.onPeerJoin(({ peerId }) => {
+      peers.add(peerId); setStatus('connected');
+      A?.manifest.send(manifest(), { target: peerId }).catch(() => {});
+    });
+    room.onPeerLeave(({ peerId }) => {
+      peers.delete(peerId);
+      for (let i = queue.length - 1; i >= 0; i--) if (queue[i].peerId === peerId) { missing.add(queue[i].id); queue.splice(i, 1); }
+      setStatus(peers.size ? 'connected' : 'searching');
+    });
+    room.onError?.(e => { if (e?.code !== 'relay-failed') console.warn('sync room', e); });
+    A.manifest.onMessage((m, { peerId }) => onManifest(m, peerId).catch(e => console.warn('manifest', e)));
+    A.meta.onMessage((m, { peerId }) => applyMeta(m, peerId).catch(e => console.warn('meta', e)));
+    A.blob.onRequest(async req => {
+      const b = req && req.id ? await getBlob(req.id) : null;
+      if (b) { sync.sent++; notify(); }
+      return b || new Uint8Array(0);
+    });
+  } catch (e) {
+    console.warn('sync start', e);
+    sync.error = String(e?.message || e);
+    setStatus('error');
+  }
+}
+// Re-send our manifest to everyone (catches anything missed while a phone was asleep).
+export function resyncNow() {
+  if (!A || !peers.size) return false;
+  const m = manifest();
+  peers.forEach(pid => A.manifest.send(m, { target: pid }).catch(() => {}));
+  return true;
+}
+setInterval(() => { if (!document.hidden) resyncNow(); }, 30000);
+export function relayInfo() {
+  try {
+    const socks = Object.values(getRelaySockets() || {});
+    return { total: socks.length, open: socks.filter(s => s && s.readyState === 1).length };
+  } catch { return { total: 0, open: 0 }; }
 }
 export async function stopSync() {
   const r = room; room = null; A = null;
@@ -179,6 +199,7 @@ async function applyMeta(m, peerId) {
     S.logs.push(...newLogs); S.logs.sort((a, b) => b.ts - a.ts);
     touched = true;
   }
+  if (S.member && !S.members.some(x => x.id === S.member.id)) { S.member = null; setSetting('memberId', ''); emit('needMember'); }
   if (touched) { sync.lastSync = Date.now(); changed(); notify(); }
 }
 
@@ -226,7 +247,7 @@ export function syncSummary() {
   const n = S.pending.size;
   if (sync.status === 'off') return S.settings.familyCode ? 'Sinkron dimatikan' : 'Belum terhubung ke keluarga';
   if (sync.status === 'unsupported') return 'Browser ini tidak mendukung sinkron';
-  if (sync.status === 'error') return 'Gagal menyambung — coba lagi nanti';
+  if (sync.status === 'error') return 'Gagal menyambung' + (sync.error ? ` (${sync.error})` : '') + ' — ketuk Sinkron sekarang';
   if (sync.receiving || sync.queued) return `Menerima foto… (${n} tersisa)`;
   if (sync.status === 'connected') return `Tersambung dengan ${sync.peers} HP keluarga${n ? ` · ${n} foto menunggu` : ' · semua sudah sinkron'}`;
   return `Mencari HP keluarga yang sedang online…${n ? ` · ${n} foto menunggu` : ''}`;
