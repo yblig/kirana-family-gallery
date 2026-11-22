@@ -66,6 +66,19 @@ async function init() {
   });
 
   window.addEventListener('online', () => startSync());
+  // Apps added to the home screen stay open for days: check for a newer version when they come back.
+  const checkUpdate = async () => {
+    if (location.protocol !== 'https:') return;
+    try {
+      const r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store' });
+      const v = await r.json();
+      if (v.build && v.build !== __BUILD_ID__ && !document.querySelector('.backdrop, .viewer, .slideshow')) {
+        toast(`Versi baru tersedia (${v.version})`, { duration: 15000, action: { label: 'Perbarui', fn: () => location.reload() } });
+      }
+    } catch { /* offline */ }
+  };
+  native.onResume(checkUpdate);
+  setTimeout(checkUpdate, 8000);
   on('needMember', () => { toast('Profil yang kamu pakai dihapus oleh keluarga. Pilih profil lagi.'); showMemberPicker({ required: true }); });
   if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./sw.js').catch(e => console.warn('sw', e));

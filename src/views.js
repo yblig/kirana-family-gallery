@@ -426,26 +426,43 @@ function appendFeed(feed, n = 8) {
   feedRendered += next.length;
   $$('.feed-item:not([data-obs])', feed).forEach(s => { s.dataset.obs = '1'; feedIO.observe(s); });
 }
-// Feed order: shuffled (default) or newest first. The shuffle stays the same while the
-// app is open (so liking/scrolling doesn't reshuffle); photos added during this session go on top.
+// Feed order: shuffled (default) or newest first. The shuffle stays the same until the app is
+// reopened or 🔀 is tapped (so liking/scrolling doesn't reshuffle). Only photos uploaded in the
+// last 3 minutes are pinned on top, so you see what you just added.
 let feedSeed = Math.floor(Math.random() * 1e9);
-const sessionStart = Date.now();
-function seeded(id) { let h = feedSeed; for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 2654435761) >>> 0; return h; }
+let feedReset = false;
+let shuffledAt = Date.now(); // page open time: only uploads made after this (and after the last 🔀) are pinned on top
+const FRESH_MS = 3 * 60 * 1000;
+function seeded(id) {
+  let h = feedSeed ^ 0x9e3779b9;
+  for (let i = 0; i < id.length; i++) { h = Math.imul(h ^ id.charCodeAt(i), 0x85ebca6b); h ^= h >>> 13; }
+  h = Math.imul(h ^ (h >>> 16), 0xc2b2ae35); return (h ^ (h >>> 16)) >>> 0;
+}
 function feedOrder(list) {
   if (S.settings.feedMode === 'new') return list.sort((a, b) => b.uploadedAt - a.uploadedAt);
-  const fresh = list.filter(p => p.uploadedAt >= sessionStart).sort((a, b) => b.uploadedAt - a.uploadedAt);
-  const rest = list.filter(p => p.uploadedAt < sessionStart).sort((a, b) => seeded(a.id) - seeded(b.id));
+  const now = Date.now();
+  const fresh = list.filter(p => now - p.uploadedAt < FRESH_MS && p.uploadedAt > shuffledAt && p.memberId === S.member?.id).sort((a, b) => b.uploadedAt - a.uploadedAt).slice(0, 12);
+  const freshIds = new Set(fresh.map(p => p.id));
+  const rest = list.filter(p => !freshIds.has(p.id)).sort((a, b) => seeded(a.id) - seeded(b.id));
   return [...fresh, ...rest];
 }
+export function reshuffleFeed() {
+  setSetting('feedMode', 'shuffle');
+  feedSeed = Math.floor(Math.random() * 1e9);
+  feedReset = true;
+  shuffledAt = Date.now();
+  sfx('toggle');
+  toast('Feed diacak ulang 🔀', { action: { label: 'Terbaru dulu', fn: () => { setSetting('feedMode', 'new'); feedReset = true; render({ resetScroll: true }); toast('Feed: terbaru dulu'); } } });
+  if (S.view !== 'feed') go('feed'); else render({ resetScroll: true });
+}
 function feedModeMenu() {
-  actionSheet('Urutan feed', [
-    { icon: 'shuffle', label: 'Acak', sub: S.settings.feedMode !== 'new' ? 'Sedang dipakai — ketuk untuk acak ulang' : 'Foto muncul secara acak', fn: () => { setSetting('feedMode', 'shuffle'); feedSeed = Math.floor(Math.random() * 1e9); toast('Feed diacak 🔀'); render({ resetScroll: true }); $('#feed') && ($('#feed').scrollTop = 0); } },
-    { icon: 'clock', label: 'Terbaru dulu', sub: 'Urut dari yang paling baru diunggah', fn: () => { setSetting('feedMode', 'new'); toast('Feed: terbaru dulu'); render({ resetScroll: true }); $('#feed') && ($('#feed').scrollTop = 0); } }
-  ]);
+  // Tap 🔀 = reshuffle right away; when in "newest" mode, switch back to shuffle.
+  reshuffleFeed();
 }
 
 function renderFeed(main) {
-  const prevId = $('.feed-item.current', main)?.dataset.fid;
+  const prevId = feedReset ? null : $('.feed-item.current', main)?.dataset.fid;
+  feedReset = false;
   feedList = feedOrder(visible());
   const shuffleOn = S.settings.feedMode !== 'new';
   const top = `<div class="feed-top"><div class="title"><span class="brand-mark">${icon('image')}</span>KIRANA</div>
