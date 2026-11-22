@@ -66,6 +66,64 @@ export function editDescTags(p) {
   });
 }
 
+// Edit tags of many photos/videos at once: add new tags, remove existing ones.
+export function allTags() {
+  const count = {};
+  S.photos.forEach(p => { if (!p.deleted) (p.tags || []).forEach(t => { count[t] = (count[t] || 0) + 1; }); });
+  return Object.entries(count).sort((a, b) => b[1] - a[1]).map(([t]) => t);
+}
+const cleanTag = t => t.trim().replace(/^#+/, '').toLowerCase().replace(/\s+/g, '-').slice(0, 40);
+export function bulkTags(ids) {
+  const list = ids.map(photoById).filter(Boolean);
+  if (!list.length) return Promise.resolve(false);
+  return new Promise(resolve => {
+    let ok = false;
+    const present = {};
+    list.forEach(p => (p.tags || []).forEach(t => { present[t] = (present[t] || 0) + 1; }));
+    const remove = new Set(), add = new Set();
+    const suggestions = allTags().filter(t => !present[t] || present[t] < list.length).slice(0, 24);
+    sfx('open');
+    const md = openModal({
+      title: `Tag untuk ${list.length} item`,
+      body: `<div class="field"><label for="btIn">Tambah tag</label>
+          <div style="display:flex;gap:8px"><input class="input" id="btIn" placeholder="liburan, ulang tahun, pantai" autocomplete="off" />
+          <button class="btn primary" id="btAdd" style="flex-shrink:0">${icon('plus', 'sm')}</button></div>
+          <div class="hint">Pisahkan dengan koma atau tekan Enter.</div></div>
+        <div class="tag-pick" id="btAdded"></div>
+        ${suggestions.length ? `<div class="group-label" style="margin:14px 2px 8px">Tag yang pernah dipakai</div><div class="tag-pick" id="btSug">${suggestions.map(t => `<button class="tchip" data-sug="${esc(t)}">#${esc(t)}</button>`).join('')}</div>` : ''}
+        ${Object.keys(present).length ? `<div class="group-label" style="margin:14px 2px 8px">Tag di item terpilih <span style="text-transform:none;letter-spacing:0;font-weight:600">· ketuk untuk hapus</span></div>
+          <div class="tag-pick" id="btHave">${Object.entries(present).sort((a, b) => b[1] - a[1]).map(([t, n]) => `<button class="tchip have" data-have="${esc(t)}">#${esc(t)} <small>${n}/${list.length}</small></button>`).join('')}</div>` : ''}`,
+      actions: [{ label: 'Batal' }, { label: 'Simpan', cls: 'primary', fn: save }],
+      onClose: () => resolve(ok)
+    });
+    const inp = $('#btIn', md.el);
+    const paintAdded = () => {
+      $('#btAdded', md.el).innerHTML = [...add].map(t => `<button class="tchip on" data-rm="${esc(t)}">#${esc(t)} ✕</button>`).join('');
+      $$('[data-rm]', md.el).forEach(b => b.onclick = () => { add.delete(b.dataset.rm); sfx('tap'); paintAdded(); syncSug(); });
+    };
+    const syncSug = () => $$('[data-sug]', md.el).forEach(b => b.classList.toggle('on', add.has(b.dataset.sug)));
+    const pushInput = () => {
+      inp.value.split(',').map(cleanTag).filter(Boolean).forEach(t => { add.add(t); remove.delete(t); });
+      inp.value = ''; paintAdded(); syncSug();
+      $$('[data-have]', md.el).forEach(b => b.classList.toggle('off', remove.has(b.dataset.have)));
+    };
+    $('#btAdd', md.el).onclick = () => { sfx('tap'); pushInput(); inp.focus(); };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); pushInput(); } });
+    $$('[data-sug]', md.el).forEach(b => b.onclick = () => { const t = b.dataset.sug; add.has(t) ? add.delete(t) : add.add(t); remove.delete(t); sfx('tap'); paintAdded(); syncSug(); });
+    $$('[data-have]', md.el).forEach(b => b.onclick = () => { const t = b.dataset.have; remove.has(t) ? remove.delete(t) : remove.add(t); add.delete(t); b.classList.toggle('off', remove.has(t)); sfx('tap'); paintAdded(); syncSug(); });
+    async function save() {
+      pushInput();
+      if (!add.size && !remove.size) { toast('Belum ada tag yang ditambah atau dihapus'); return false; }
+      list.forEach(p => { p.tags = [...new Set([...(p.tags || []).filter(t => !remove.has(t)), ...add])].slice(0, 30); });
+      await savePhotos(list);
+      const parts = [add.size && `menambah tag ${[...add].map(t => '#' + t).join(' ')}`, remove.size && `menghapus tag ${[...remove].map(t => '#' + t).join(' ')}`].filter(Boolean).join(' & ');
+      addLog('edit-desc', `${parts} pada ${list.length} item`);
+      ok = true; sfx('success'); toast(`Tag ${list.length} item diperbarui`, { type: 'success' }); emit('change');
+      return true;
+    }
+  });
+}
+
 export async function rotate(p) {
   p.rot = ((p.rot || 0) + 90) % 360;
   await savePhotos(p);

@@ -151,7 +151,7 @@ export const S = {
   member: null,
   view: 'feed', param: null,
   selecting: false, selected: new Set(),
-  filters: { q: '', sort: 'new', range: 'all', from: '', to: '', member: 'all', kind: 'all' },
+  filters: { q: '', sort: 'new', range: 'all', from: '', to: '', member: 'all', kind: 'all', tag: '' },
   logFilter: 'all',
   settings: {}
 };

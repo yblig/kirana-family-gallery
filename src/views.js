@@ -334,6 +334,7 @@ function renderSelbar() {
   ];
   else if (S.view === 'archive') acts = [
     ['archive', 'Keluarkan', async () => { await A.setFlag(ids(), 'archived', false); exitSelection(); }],
+    ['tag', 'Tag', async () => { if (await A.bulkTags(ids())) exitSelection(); }],
     ['download', 'Unduh', () => A.downloadPhotos(ids())],
     ['trash', 'Hapus', async () => { await A.softDelete(ids()); exitSelection(); }, true]
   ];
@@ -342,6 +343,7 @@ function renderSelbar() {
     ['pin', allPin ? 'Lepas pin' : 'Pin', async () => { await A.setFlag(ids(), 'pinned', !allPin); exitSelection(); }],
     ['archive', 'Arsip', async () => { await A.setFlag(ids(), 'archived', true); exitSelection(); }],
     ['album', 'Album', async () => { await A.chooseAlbum(ids()); exitSelection(); }],
+    ['tag', 'Tag', async () => { if (await A.bulkTags(ids())) exitSelection(); }],
     ['download', 'Unduh', () => A.downloadPhotos(ids())],
     ['trash', 'Hapus', async () => { await A.softDelete(ids()); exitSelection(); }, true]
   ];
@@ -548,6 +550,7 @@ function applyFilters(list) {
   if (q) list = list.filter(p => [p.name, p.desc, (p.tags || []).join(' '), p.memberName].join(' ').toLowerCase().includes(q.replace(/^#/, '')));
   if (f.member !== 'all') list = list.filter(p => p.memberId === f.member);
   if (f.kind === 'video') list = list.filter(isVideo); else if (f.kind === 'photo') list = list.filter(p => !isVideo(p));
+  if (f.tag) list = list.filter(p => (p.tags || []).includes(f.tag));
   const now = new Date(); const sod = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const ranges = { today: [sod, Infinity], d7: [Date.now() - 7 * 864e5, Infinity], d30: [Date.now() - 30 * 864e5, Infinity], year: [new Date(now.getFullYear(), 0, 1).getTime(), Infinity] };
   if (ranges[f.range]) { const [a, b] = ranges[f.range]; list = list.filter(p => p.uploadedAt >= a && p.uploadedAt < b); }
@@ -584,13 +587,14 @@ function renderGallery(main) {
     </div>
     ${f.range === 'custom' ? `<div class="date-range">${icon('calendar', 'sm')}<input type="date" id="from" value="${f.from}"> – <input type="date" id="to" value="${f.to}"></div>` : ''}
     <div class="chips" id="kchips">${[['all', 'Semua jenis'], ['photo', '📷 Foto'], ['video', '🎬 Video']].map(([k, l]) => `<button class="chip ${(f.kind || 'all') === k ? 'active' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
+    ${(() => { const tags = A.allTags().slice(0, 30); if (f.tag && !tags.includes(f.tag)) f.tag = ''; return tags.length ? `<div class="chips" id="tchips">${tags.map(t => `<button class="chip ${f.tag === t ? 'active' : ''}" data-t="${esc(t)}">#${esc(t)}</button>`).join('')}</div>` : ''; })()}
     <div class="chips" id="mchips"><button class="chip ${f.member === 'all' ? 'active' : ''}" data-m="all">Semua</button>${S.members.map(m => `<button class="chip ${f.member === m.id ? 'active' : ''}" data-m="${m.id}">${esc(m.emoji)} ${esc(m.name)}</button>`).join('')}</div>
     <div id="gres"></div>`;
   const res = $('#gres', main);
   const draw = () => {
     const list = applyFilters(visible());
     if (!list.length) { res.innerHTML = emptyState('search', 'Tidak ditemukan', 'Coba kata kunci atau filter lain.'); return; }
-    const filtered = f.q || f.member !== 'all' || f.range !== 'all' || (f.kind && f.kind !== 'all');
+    const filtered = f.q || f.member !== 'all' || f.range !== 'all' || (f.kind && f.kind !== 'all') || f.tag;
     const pinned = !filtered && ['new', 'old', 'taken'].includes(f.sort) ? list.filter(p => p.pinned) : [];
     const rest = pinned.length ? list.filter(p => !p.pinned) : list;
     let html = '';
@@ -606,6 +610,7 @@ function renderGallery(main) {
   $('#sort', main).onchange = e => { f.sort = e.target.value; sfx('tap'); draw(); };
   $('#range', main).onchange = e => { f.range = e.target.value; sfx('tap'); render(); };
   if ($('#from', main)) { $('#from', main).onchange = e => { f.from = e.target.value; draw(); }; $('#to', main).onchange = e => { f.to = e.target.value; draw(); }; }
+  $$('#tchips [data-t]', main).forEach(b => b.onclick = () => { f.tag = f.tag === b.dataset.t ? '' : b.dataset.t; sfx('tap'); $$('#tchips .chip', main).forEach(x => x.classList.toggle('active', x.dataset.t === f.tag)); draw(); });
   $$('#kchips [data-k]', main).forEach(b => b.onclick = () => { f.kind = b.dataset.k; sfx('tap'); $$('#kchips .chip', main).forEach(x => x.classList.toggle('active', x === b)); draw(); });
   $$('#mchips [data-m]', main).forEach(b => b.onclick = () => { f.member = b.dataset.m; sfx('tap'); $$('#mchips .chip', main).forEach(x => x.classList.toggle('active', x === b)); draw(); });
   bindCols(main, draw);

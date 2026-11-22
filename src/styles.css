@@ -572,3 +572,12 @@ kbd { background: var(--surface-2); border-radius: 7px; padding: 2px 8px; font-w
 .mem-card .vbadge { position: absolute; top: 7px; right: 7px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,.5); display: grid; place-items: center; color: #fff; }
 .mem-card .vbadge .ic { width: 11px; height: 11px; }
 @media (max-height: 700px) { .feed-rail .rail-btn > span:not(.bub):not(.n):not(.avatar) { display: none; } }
+
+/* ---------- bulk tags ---------- */
+.tag-pick { display: flex; flex-wrap: wrap; gap: 7px; }
+.tchip { padding: 7px 12px; border-radius: 99px; background: var(--surface-2); font-weight: 750; font-size: 13px; color: var(--text); transition: all var(--t); }
+.tchip small { color: var(--muted); font-weight: 700; margin-left: 2px; }
+.tchip.on { background: var(--accent); color: var(--accent-text); }
+.tchip.have { background: var(--accent-soft); color: var(--accent); }
+.tchip.have.off { background: rgba(255, 84, 112, .12); color: var(--danger); text-decoration: line-through; }
+.tchip:active { transform: scale(.95); }
