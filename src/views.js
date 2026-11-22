@@ -338,14 +338,14 @@ function renderSelbar() {
   else acts = [
     ['star', allFav ? 'Batal favorit' : 'Favorit', async () => { await A.setFlag(ids(), 'fav', !allFav); exitSelection(); }],
     ['pin', allPin ? 'Lepas pin' : 'Pin', async () => { await A.setFlag(ids(), 'pinned', !allPin); exitSelection(); }],
-    ['archive', 'Arsipkan', async () => { await A.setFlag(ids(), 'archived', true); exitSelection(); }],
+    ['archive', 'Arsip', async () => { await A.setFlag(ids(), 'archived', true); exitSelection(); }],
     ['album', 'Album', async () => { await A.chooseAlbum(ids()); exitSelection(); }],
     ['download', 'Unduh', () => A.downloadPhotos(ids())],
     ['trash', 'Hapus', async () => { await A.softDelete(ids()); exitSelection(); }, true]
   ];
   bar.innerHTML = `<div class="top"><button class="icon-btn ghost" data-sx>${icon('x')}</button><b>${n} dipilih</b>
       <button class="btn sm" data-sall>${icon('select', 'sm')} Pilih semua</button></div>
-    <div class="acts">${acts.map((a, i) => `<button class="sel-act ${a[3] ? 'danger' : ''}" data-si="${i}" ${n ? '' : 'disabled'}>${icon(a[0])}<span>${a[1]}</span></button>`).join('')}</div>`;
+    <div class="acts" style="--n:${acts.length}">${acts.map((a, i) => `<button class="sel-act ${a[3] ? 'danger' : ''}" data-si="${i}" ${n ? '' : 'disabled'}>${icon(a[0])}<span>${a[1]}</span></button>`).join('')}</div>`;
   $('[data-sx]', bar).onclick = () => exitSelection();
   $('[data-sall]', bar).onclick = () => {
     const all = $$('#main .cell').map(c => c.dataset.pid);
