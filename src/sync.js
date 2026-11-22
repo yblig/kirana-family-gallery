@@ -225,13 +225,14 @@ async function work() {
       const blob = res instanceof Blob ? res : (res && (res.byteLength || res.size)) ? new Blob([res], { type: rec.type || 'image/jpeg' }) : null;
       if (blob && blob.size) {
         const typed = blob.type ? blob : new Blob([blob], { type: rec.type || 'image/jpeg' });
-        let thumb = typed;
+        let thumb = typed, view = null;
         try {
-          if (isVideo(rec)) thumb = (await videoInfo(typed)).thumb;
-          else { const img = await decodeImage(typed); thumb = await makeThumb(img, 500, 0.82); img.close?.(); }
+          const { prepareMedia } = await import('./media.js');
+          const info = await prepareMedia(typed, { name: rec.name, type: rec.type });
+          thumb = info.thumb; view = info.view;
         } catch { /* keep original as thumb */ }
         if (S.pending.has(id)) {
-          await db.put('blobs', { id, blob: typed, thumb });
+          await db.put('blobs', view ? { id, blob: typed, thumb, view } : { id, blob: typed, thumb });
           const { pending, ...meta } = S.pending.get(id);
           await savePhotos(meta, { remote: true });
           changed();

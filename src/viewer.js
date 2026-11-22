@@ -80,6 +80,7 @@ async function show() {
   } else {
     V.vid.removeAttribute('src');
     V.pic.src = t; V.pic.style.opacity = '1';
+    if (p.unsupported) { toast('Format ini belum bisa ditampilkan, tapi file aslinya tersimpan — ketuk Unduh untuk membukanya'); A.markViewed(p); return; }
     const f = await fullUrl(p.id);
     if (!V || token !== V.token) return;
     if (f) { const pre = new Image(); pre.onload = () => { if (V && token === V.token) V.pic.src = f; }; pre.src = f; }
@@ -385,7 +386,7 @@ async function showSlide() {
   nextL.style.setProperty('--rot', r + 'deg');
   nextL.style.setProperty('--dur', (SS.speed + 1.5) + 's');
   const t = await thumbUrl(p.id);
-  const url = await fullUrl(p.id) || t;
+  const url = p.unsupported ? t : (await fullUrl(p.id) || t);
   if (!SS) return;
   const img = $('img', nextL), vid = $('video', nextL);
   img.hidden = video; vid.hidden = !video;

@@ -396,6 +396,7 @@ async function loadFeedItem(sec) {
   if (t) $('.feed-bg', sec).style.backgroundImage = `url("${t}")`;
   if (media.tagName === 'VIDEO') { if (t) media.poster = t; return; }
   if (t && !media.src) media.src = t;
+  if (photoById(id)?.unsupported) return;
   const f = await fullUrl(id);
   if (f) { const pre = new Image(); pre.onload = () => { media.src = f; }; pre.src = f; }
 }

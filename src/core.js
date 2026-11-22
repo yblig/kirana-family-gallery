@@ -257,7 +257,7 @@ export async function fullUrl(id) {
   if (fullCache.has(id)) { const u = fullCache.get(id); fullCache.delete(id); fullCache.set(id, u); return u; }
   const rec = await db.get('blobs', id);
   if (!rec) return '';
-  const u = URL.createObjectURL(rec.blob);
+  const u = URL.createObjectURL(rec.view || rec.blob); // view = browser-friendly copy for HEIC/TIFF/RAW
   fullCache.set(id, u); lru(fullCache, 14);
   return u;
 }
