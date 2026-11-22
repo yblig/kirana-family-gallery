@@ -424,10 +424,30 @@ function appendFeed(feed, n = 8) {
   feedRendered += next.length;
   $$('.feed-item:not([data-obs])', feed).forEach(s => { s.dataset.obs = '1'; feedIO.observe(s); });
 }
+// Feed order: shuffled (default) or newest first. The shuffle stays the same while the
+// app is open (so liking/scrolling doesn't reshuffle); photos added during this session go on top.
+let feedSeed = Math.floor(Math.random() * 1e9);
+const sessionStart = Date.now();
+function seeded(id) { let h = feedSeed; for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 2654435761) >>> 0; return h; }
+function feedOrder(list) {
+  if (S.settings.feedMode === 'new') return list.sort((a, b) => b.uploadedAt - a.uploadedAt);
+  const fresh = list.filter(p => p.uploadedAt >= sessionStart).sort((a, b) => b.uploadedAt - a.uploadedAt);
+  const rest = list.filter(p => p.uploadedAt < sessionStart).sort((a, b) => seeded(a.id) - seeded(b.id));
+  return [...fresh, ...rest];
+}
+function feedModeMenu() {
+  actionSheet('Urutan feed', [
+    { icon: 'shuffle', label: 'Acak', sub: S.settings.feedMode !== 'new' ? 'Sedang dipakai — ketuk untuk acak ulang' : 'Foto muncul secara acak', fn: () => { setSetting('feedMode', 'shuffle'); feedSeed = Math.floor(Math.random() * 1e9); toast('Feed diacak 🔀'); render({ resetScroll: true }); $('#feed') && ($('#feed').scrollTop = 0); } },
+    { icon: 'clock', label: 'Terbaru dulu', sub: 'Urut dari yang paling baru diunggah', fn: () => { setSetting('feedMode', 'new'); toast('Feed: terbaru dulu'); render({ resetScroll: true }); $('#feed') && ($('#feed').scrollTop = 0); } }
+  ]);
+}
+
 function renderFeed(main) {
   const prevId = $('.feed-item.current', main)?.dataset.fid;
-  feedList = visible().sort((a, b) => b.uploadedAt - a.uploadedAt);
+  feedList = feedOrder(visible());
+  const shuffleOn = S.settings.feedMode !== 'new';
   const top = `<div class="feed-top"><div class="title"><span class="brand-mark">${icon('image')}</span>KIRANA</div>
+    <button class="icon-btn ${shuffleOn ? 'on' : ''}" data-feedmode aria-label="Urutan feed" title="${shuffleOn ? 'Acak' : 'Terbaru'}">${icon(shuffleOn ? 'shuffle' : 'clock')}</button>
     ${syncPill(true)}
     <button class="icon-btn" data-upload aria-label="Unggah">${icon('upload')}</button>
     <button class="member-chip" data-member>${avatarHTML(S.member, 'sm')}<span class="hide-mob">${esc(S.member?.name || '')}</span></button></div>`;
@@ -962,7 +982,7 @@ const VIEWS = {
 // Global click delegation for common data-* buttons
 export function bindChrome() {
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-go],[data-upload],[data-upfiles],[data-member],[data-more],[data-select],[data-newalbum],[data-back],[data-surprise],[data-lock],[data-sync]');
+    const t = e.target.closest('[data-feedmode],[data-go],[data-upload],[data-upfiles],[data-member],[data-more],[data-select],[data-newalbum],[data-back],[data-surprise],[data-lock],[data-sync]');
     if (!t) return;
     if (t.closest('.modal, .sheet')) return;
     sfx('tap');
@@ -976,6 +996,7 @@ export function bindChrome() {
     else if (t.hasAttribute('data-surprise')) surprise();
     else if (t.hasAttribute('data-lock')) lockNow();
     else if (t.hasAttribute('data-sync')) openFamilySync();
+    else if (t.hasAttribute('data-feedmode')) feedModeMenu();
     else if (t.hasAttribute('data-upfiles')) startUpload({ fromFiles: true });
   });
   on('change', () => { if (!viewerOpen()) render(); });

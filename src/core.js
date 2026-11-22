@@ -155,7 +155,7 @@ export const S = {
   logFilter: 'all',
   settings: {}
 };
-const DEFAULTS = { theme: 'dark', accent: '#7c5cff', cols: 3, private: false, pin: '', lockOnResume: true, sound: true, haptics: true, memberId: '', familyCode: '', syncOn: true, syncIntro: false };
+const DEFAULTS = { theme: 'dark', accent: '#7c5cff', cols: 3, private: false, pin: '', lockOnResume: true, sound: true, haptics: true, memberId: '', familyCode: '', syncOn: true, syncIntro: false, feedMode: 'shuffle' };
 export function loadSettings() { S.settings = { ...DEFAULTS, ...storage.get('settings', {}) }; }
 export function setSetting(k, v) { S.settings[k] = v; storage.set('settings', S.settings); }
 
