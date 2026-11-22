@@ -4,19 +4,20 @@
 import {
   S, $, esc, icon, uid, openModal, toast, sfx, db, savePhotos, saveAlbum, saveMember, addLog, emit, pickFiles,
   decodeImage, makeThumb, sha256, isNative, blobToDataURL, dataURLToBlob, saveBlob, writeChunks, shareUri, fmtSize,
-  albumById, getBlob, sleep
+  albumById, getBlob, sleep, isVideoFile, videoType, videoInfo, quickHash, fmtSize as _fs
 } from './core.js';
+const MAX_VIDEO = 1024 * 1024 * 1024; // 1 GB per video
 
 // ----------------------------- Upload --------------------------------
 export async function startUpload({ albumId = null } = {}) {
-  const files = (await pickFiles('fileInput', { accept: 'image/*', multiple: true })).filter(f => !f.type || f.type.startsWith('image/'));
+  const files = (await pickFiles('fileInput', { accept: 'image/*,video/*', multiple: true })).filter(f => !f.type || f.type.startsWith('image/') || isVideoFile(f));
   if (!files.length) return;
   await uploadFiles(files, { albumId });
 }
 
 export async function uploadFiles(files, { albumId = null } = {}) {
   const md = openModal({
-    title: 'Mengunggah foto', dismissable: false,
+    title: 'Mengunggah', dismissable: false,
     body: `<div class="up-meta"><span id="upCount">0 / ${files.length}</span><span id="upPct">0%</span></div>
       <div class="up-progress"><i id="upBar"></i></div>
       <div class="up-file" id="upFile">Menyiapkan…</div>
@@ -25,7 +26,7 @@ export async function uploadFiles(files, { albumId = null } = {}) {
   try { navigator.storage?.persist?.(); } catch { /* ignore */ }
   const bar = $('#upBar', md.el), cnt = $('#upCount', md.el), pct = $('#upPct', md.el), fl = $('#upFile', md.el), th = $('#upThumbs', md.el);
   const known = new Set(S.photos.filter(p => !p.deleted && p.hash).map(p => p.hash));
-  let ok = 0, failed = 0, dup = 0;
+  let ok = 0, failed = 0, dup = 0, tooBig = 0;
   const added = [];
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
@@ -33,25 +34,39 @@ export async function uploadFiles(files, { albumId = null } = {}) {
     const setP = frac => { const v = Math.round(((i + frac) / files.length) * 100); bar.style.width = v + '%'; pct.textContent = v + '%'; };
     setP(0.05);
     try {
-      const img = await decodeImage(f);
-      setP(0.35);
-      const thumb = await makeThumb(img, 500, 0.82);
-      const w = img.width, h = img.height;
-      if (img.close) img.close();
-      setP(0.6);
-      const hash = await sha256(await f.arrayBuffer());
+      const video = isVideoFile(f);
+      let thumb, w, h, duration = 0, hash;
+      if (video) {
+        if (f.size > MAX_VIDEO) throw new Error('too-big');
+        fl.textContent = `${f.name || 'Video'} · ${_fs(f.size)}`;
+        const info = await videoInfo(f);
+        thumb = info.thumb; w = info.w; h = info.h; duration = info.duration;
+        setP(0.5);
+        hash = await quickHash(f);
+      } else {
+        const img = await decodeImage(f);
+        setP(0.35);
+        thumb = await makeThumb(img, 500, 0.82);
+        w = img.width; h = img.height;
+        if (img.close) img.close();
+        setP(0.6);
+        hash = await sha256(await f.arrayBuffer());
+      }
       if (known.has(hash)) dup++;
       known.add(hash);
       setP(0.8);
       const id = uid();
       const m = S.member || {};
+      const type = video ? videoType(f) : (f.type || 'image/jpeg');
       const p = {
-        id, name: f.name || `Foto ${new Date().toISOString().slice(0, 10)}.jpg`, desc: '', tags: [], size: f.size, type: f.type || 'image/jpeg',
+        id, name: f.name || `${video ? 'Video' : 'Foto'} ${new Date().toISOString().slice(0, 10)}.${video ? 'mp4' : 'jpg'}`, desc: '', tags: [], size: f.size, type,
+        kind: video ? 'video' : 'photo', duration,
         uploadedAt: Date.now(), takenAt: f.lastModified || Date.now(), albumId, fav: false, likes: 0, likedBy: [], pinned: false,
         archived: false, deleted: false, deletedAt: null, rot: 0, memberId: m.id || '', memberName: m.name || 'Tamu', memberEmoji: m.emoji || '👤',
         viewedAt: null, w, h, hash
       };
-      await db.put('blobs', { id, blob: f, thumb });
+      const blob = f.type ? f : new Blob([f], { type });
+      await db.put('blobs', { id, blob, thumb });
       await savePhotos(p);
       added.push(p);
       ok++;
@@ -60,7 +75,7 @@ export async function uploadFiles(files, { albumId = null } = {}) {
       sfx('shutter', { volume: 0.6 });
     } catch (e) {
       console.warn('upload failed', f.name, e);
-      failed++;
+      if (e?.message === 'too-big') tooBig++; else failed++;
     }
     cnt.textContent = `${i + 1} / ${files.length}`;
     setP(1);
@@ -70,10 +85,13 @@ export async function uploadFiles(files, { albumId = null } = {}) {
   md.close();
   if (ok) {
     const a = albumById(albumId);
-    await addLog('upload', `mengunggah ${ok} foto${a ? ` ke album “${a.name}”` : ''}`);
+    const nv = added.filter(p => p.kind === 'video').length, nf = added.length - nv;
+    const what = [nf && `${nf} foto`, nv && `${nv} video`].filter(Boolean).join(' & ');
+    await addLog('upload', `mengunggah ${what}${a ? ` ke album “${a.name}”` : ''}`);
     sfx('success');
-    toast(`${ok} foto berhasil diunggah${dup ? ` · ${dup} mungkin duplikat` : ''}`, { type: 'success', duration: 3200 });
+    toast(`${what} berhasil diunggah${dup ? ` · ${dup} mungkin duplikat` : ''}`, { type: 'success', duration: 3200 });
   }
+  if (tooBig) toast(`${tooBig} video lebih dari 1 GB dilewati`, { type: 'error', duration: 3800 });
   if (failed) toast(`${failed} file gagal dibaca (format tidak didukung)`, { type: 'error', duration: 3800 });
   emit('change');
   return added;

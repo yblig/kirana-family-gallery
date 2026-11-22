@@ -91,7 +91,7 @@ export function blobToDataURL(blob) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
 }
 export async function dataURLToBlob(url) { const r = await fetch(url); return r.blob(); }
-export function extFor(type = '') { return ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic', 'image/avif': 'avif', 'image/bmp': 'bmp' })[type] || 'jpg'; }
+export function extFor(type = '') { return ({ 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/3gpp': '3gp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic', 'image/avif': 'avif', 'image/bmp': 'bmp' })[type] || 'jpg'; }
 export function withExt(name, type) { return /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}.${extFor(type)}`; }
 export function safeName(n) { return String(n).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120) || 'foto'; }
 
@@ -151,7 +151,7 @@ export const S = {
   member: null,
   view: 'feed', param: null,
   selecting: false, selected: new Set(),
-  filters: { q: '', sort: 'new', range: 'all', from: '', to: '', member: 'all' },
+  filters: { q: '', sort: 'new', range: 'all', from: '', to: '', member: 'all', kind: 'all' },
   logFilter: 'all',
   settings: {}
 };
@@ -522,7 +522,7 @@ export async function makeThumb(src, max = 500, q = 0.82) {
 // Returns the original blob, re-encoded with rotation applied when rot != 0.
 export async function rotatedBlob(p) {
   const blob = await getBlob(p.id);
-  if (!blob || !p.rot) return blob;
+  if (!blob || !p.rot || isVideo(p)) return blob;
   try {
     const img = await decodeImage(blob);
     const r = ((p.rot % 360) + 360) % 360;
@@ -536,8 +536,91 @@ export async function rotatedBlob(p) {
   } catch { return blob; }
 }
 export function downloadName(p, rotated) {
+  if (isVideo(p)) return safeName(withExt(p.name, p.type).replace(/\.quicktime$/, '.mov'));
   const base = rotated && p.rot ? p.name.replace(/\.[a-z0-9]{2,5}$/i, '') + '.jpg' : withExt(p.name, p.type);
   return safeName(base);
+}
+
+// ----------------------------- Video ---------------------------------
+export const VIDEO_RE = /\.(mov|mp4|m4v|webm|3gp|mkv|avi)$/i;
+export const isVideoFile = f => (f.type || '').startsWith('video/') || VIDEO_RE.test(f.name || '');
+export const isVideo = p => !!p && ((p.type || '').startsWith('video/') || p.kind === 'video');
+export function videoType(f) {
+  if (f.type) return f.type;
+  const ext = (f.name || '').split('.').pop().toLowerCase();
+  return { mov: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp', mkv: 'video/x-matroska', avi: 'video/x-msvideo' }[ext] || 'video/mp4';
+}
+export function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
+}
+async function placeholderThumb(w, h) {
+  const r = w && h ? w / h : 16 / 9;
+  const c = document.createElement('canvas');
+  c.width = r >= 1 ? 500 : Math.round(500 * r); c.height = r >= 1 ? Math.round(500 / r) : 500;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, c.width, c.height);
+  gr.addColorStop(0, '#3b2a8f'); gr.addColorStop(1, '#14121f');
+  g.fillStyle = gr; g.fillRect(0, 0, c.width, c.height);
+  const cx = c.width / 2, cy = c.height / 2, R = Math.min(c.width, c.height) * 0.16;
+  g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#5b3fe0'; g.beginPath(); g.moveTo(cx - R * 0.3, cy - R * 0.45); g.lineTo(cx + R * 0.5, cy); g.lineTo(cx - R * 0.3, cy + R * 0.45); g.closePath(); g.fill();
+  return canvasToBlob(c, 'image/jpeg', 0.85);
+}
+// Reads a video's size/duration and grabs a frame as JPEG thumbnail (max 500px).
+export function videoInfo(blob, max = 500) {
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    const url = URL.createObjectURL(blob);
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+    v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(v);
+    let done = false;
+    const finish = async ok => {
+      if (done) return; done = true; clearTimeout(timer);
+      const w = v.videoWidth || 0, h = v.videoHeight || 0;
+      const duration = isFinite(v.duration) ? v.duration : 0;
+      let thumb = null;
+      if (ok && w && h) {
+        try {
+          const s = Math.min(1, max / Math.max(w, h));
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          thumb = await canvasToBlob(c, 'image/jpeg', 0.82);
+        } catch { thumb = null; }
+      }
+      if (!thumb) thumb = await placeholderThumb(w, h);
+      try { v.pause(); } catch { /* ignore */ }
+      v.removeAttribute('src'); try { v.load(); } catch { /* ignore */ }
+      v.remove(); URL.revokeObjectURL(url);
+      resolve({ thumb, w, h, duration });
+    };
+    const timer = setTimeout(() => finish(v.readyState >= 2), 9000);
+    v.onloadedmetadata = () => {
+      const t = Math.min(1, (v.duration || 0) / 3) || 0.1;
+      try { v.currentTime = t; } catch { finish(true); }
+    };
+    v.onloadeddata = () => { // iOS sometimes needs a play() before frames can be drawn
+      const p = v.play(); if (p && p.then) p.then(() => v.pause()).catch(() => {});
+    };
+    v.onseeked = () => setTimeout(() => finish(true), 150);
+    v.onerror = () => finish(false);
+    v.src = url;
+  });
+}
+// Fast fingerprint for big files: size + first & last 2 MB.
+export async function quickHash(file) {
+  const MB2 = 2 * 1024 * 1024;
+  if (file.size <= MB2 * 2) return sha256(await file.arrayBuffer());
+  const a = new Uint8Array(await file.slice(0, MB2).arrayBuffer());
+  const b = new Uint8Array(await file.slice(file.size - MB2).arrayBuffer());
+  const sz = new TextEncoder().encode(String(file.size));
+  const all = new Uint8Array(a.length + b.length + sz.length);
+  all.set(a); all.set(b, a.length); all.set(sz, a.length + b.length);
+  return sha256(all);
 }
 
 // ----------------------------- Members helpers -----------------------

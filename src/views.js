@@ -5,7 +5,7 @@
 import {
   S, $, $$, el, esc, icon, toast, sfx, emit, on, openModal, confirmDialog, promptDialog, copyText, actionSheet, hydrateThumbs, thumbUrl, fullUrl,
   photoById, albumById, memberById, visible, avatarHTML, fmtSize, fmtDate, fmtDateTime, fmtTime, relTime, dayLabel, monthName,
-  setSetting, db, addLog, logIcon, deleteRecords, native, mix, hexToRgb, isNative, isIOS, isStandalone, storage, audio, savePhotos
+  setSetting, db, addLog, logIcon, deleteRecords, isVideo, fmtDur, native, mix, hexToRgb, isNative, isIOS, isStandalone, storage, audio, savePhotos
 } from './core.js';
 import * as A from './actions.js';
 import { startUpload, exportBackup, importBackup, storageInfo } from './io.js';
@@ -60,7 +60,7 @@ function renderSidebar() {
   const active = S.view === 'album' ? 'albums' : S.view;
   $('#sidebar').innerHTML = `
     <div class="brand"><span class="brand-mark">${icon('image')}</span><div>KIRANA<small>FAMILY GALLERY</small></div></div>
-    <button class="btn primary block" data-upload style="margin-bottom:12px">${icon('upload', 'sm')} Unggah Foto</button>
+    <button class="btn primary block" data-upload style="margin-bottom:12px">${icon('upload', 'sm')} Unggah Foto/Video</button>
     ${NAV.map((n, i) => `${i === 4 || i === 7 ? '<div class="side-sep"></div>' : ''}<button class="side-item ${active === n.id ? 'active' : ''}" data-go="${n.id}">${icon(n.icon)}<span>${n.label}</span>${c[n.id] != null ? `<span class="count">${c[n.id]}</span>` : ''}</button>`).join('')}
     <div class="side-sep"></div>
     <button class="side-item" data-sync>${icon('users')}<span>Sinkron Keluarga</span></button>
@@ -230,7 +230,7 @@ function emptyArt(sym = 'image') {
 function emptyState(sym, title, text, buttons = '') {
   return `<div class="empty">${emptyArt(sym)}<h3>${esc(title)}</h3><p>${esc(text)}</p>${buttons}</div>`;
 }
-const uploadBtn = (label = 'Unggah Foto') => `<button class="btn primary" data-upload>${icon('upload', 'sm')} ${label}</button>`;
+const uploadBtn = (label = 'Unggah Foto/Video') => `<button class="btn primary" data-upload>${icon('upload', 'sm')} ${label}</button>`;
 
 // ----------------------------- Grid ----------------------------------
 function cellHTML(p, { trash = false } = {}) {
@@ -240,6 +240,7 @@ function cellHTML(p, { trash = false } = {}) {
     <img data-thumb="${p.id}" alt="">
     <span class="badges">${p.pinned ? `<span class="badge">${icon('pin')}</span>` : ''}${p.fav ? `<span class="badge fav">${icon('star', 'fill')}</span>` : ''}</span>
     ${p.likes ? `<span class="likes">${icon('heart', 'fill')}${p.likes}</span>` : ''}
+    ${isVideo(p) ? `<span class="dur ${left != null ? 'up' : ''}">${icon('play', 'fill')}${fmtDur(p.duration)}</span>` : ''}
     ${left != null ? `<span class="days-left">${left} hari</span>` : ''}
     <span class="check">${icon('check')}</span></div>`;
 }
@@ -365,11 +366,12 @@ function feedItemHTML(p) {
   const r = p.rot || 0;
   return `<section class="feed-item ${r ? 'r' + r : ''}" data-fid="${p.id}" style="--rot:${r}deg">
     <div class="feed-bg"></div>
-    <img class="feed-img" alt="">
+    ${isVideo(p) ? '<video class="feed-img feed-vid" playsinline webkit-playsinline muted loop preload="none"></video><div class="vid-ind"></div>' : '<img class="feed-img" alt="">'}
     <div class="feed-shade"></div>
     <div class="feed-rail">
       <button class="rail-btn" data-f="who">${m ? avatarHTML(m) : `<span class="avatar">${esc(p.memberEmoji || '👤')}</span>`}</button>
       <button class="rail-btn ${A.isLiked(p) ? 'liked' : ''}" data-f="like"><span class="bub">${icon('heart')}</span><span class="n">${p.likes || 0}</span></button>
+      ${isVideo(p) ? `<button class="rail-btn" data-f="mute"><span class="bub">${icon(feedMuted ? 'volume-x' : 'volume')}</span><span>${feedMuted ? 'Suara' : 'Bisukan'}</span></button>` : ''}
       <button class="rail-btn ${p.fav ? 'faved' : ''}" data-f="fav"><span class="bub">${icon('star')}</span><span>Favorit</span></button>
       <button class="rail-btn" data-f="share"><span class="bub">${icon('share')}</span><span>Bagikan</span></button>
       <button class="rail-btn" data-f="dl"><span class="bub">${icon('download')}</span><span>Simpan</span></button>
@@ -384,15 +386,33 @@ function feedItemHTML(p) {
     </div>
   </section>`;
 }
+let feedMuted = true;
 async function loadFeedItem(sec) {
   if (sec.dataset.loaded) return;
   sec.dataset.loaded = '1';
   const id = sec.dataset.fid;
-  const img = $('.feed-img', sec);
+  const media = $('.feed-img', sec);
   const t = await thumbUrl(id);
-  if (t) { $('.feed-bg', sec).style.backgroundImage = `url("${t}")`; if (!img.src) img.src = t; }
+  if (t) $('.feed-bg', sec).style.backgroundImage = `url("${t}")`;
+  if (media.tagName === 'VIDEO') { if (t) media.poster = t; return; }
+  if (t && !media.src) media.src = t;
   const f = await fullUrl(id);
-  if (f) { const pre = new Image(); pre.onload = () => { img.src = f; }; pre.src = f; }
+  if (f) { const pre = new Image(); pre.onload = () => { media.src = f; }; pre.src = f; }
+}
+// Play the video in the current feed item, pause all others.
+async function feedPlay(sec) {
+  $$('#feed video').forEach(v => { if (!sec || !sec.contains(v)) { try { v.pause(); } catch { /* ignore */ } } });
+  const v = sec && $('video', sec);
+  if (!v) return;
+  if (!v.src) { const u = await fullUrl(sec.dataset.fid); if (!u) return; v.src = u; }
+  if (!sec.classList.contains('current')) return;
+  v.muted = feedMuted;
+  try { await v.play(); } catch { v.muted = true; try { await v.play(); } catch { /* user must tap */ } }
+}
+function feedInd(sec, playing) {
+  const ind = $('.vid-ind', sec); if (!ind) return;
+  ind.innerHTML = icon(playing ? 'play' : 'pause', 'fill');
+  ind.classList.remove('show'); void ind.offsetWidth; ind.classList.add('show');
 }
 function appendFeed(feed, n = 8) {
   const next = feedList.slice(feedRendered, feedRendered + n);
@@ -418,6 +438,7 @@ function renderFeed(main) {
   feedIO = new IntersectionObserver(entries => {
     entries.forEach(en => {
       const sec = en.target;
+      if (!en.isIntersecting) { const v = $('video', sec); if (v) try { v.pause(); } catch { /* ignore */ } }
       if (en.isIntersecting) {
         loadFeedItem(sec);
         const nx = sec.nextElementSibling; if (nx) loadFeedItem(nx);
@@ -425,6 +446,7 @@ function renderFeed(main) {
       if (en.intersectionRatio > 0.6) {
         $$('.feed-item.current', feed).forEach(x => x.classList.remove('current'));
         sec.classList.add('current');
+        feedPlay(sec);
         clearTimeout(viewTimer);
         viewTimer = setTimeout(() => { const p = photoById(sec.dataset.fid); if (p && sec.classList.contains('current')) A.markViewed(p); }, 1500);
         if (!sec.nextElementSibling || !sec.nextElementSibling.nextElementSibling) appendFeed(feed);
@@ -451,6 +473,12 @@ function bindFeed(feed) {
       else if (f === 'dl') A.downloadPhotos([p.id]);
       else if (f === 'who') { const m = memberById(p.memberId); toast(`Diunggah oleh ${m?.name || p.memberName} ${p.memberEmoji || ''} · ${fmtDateTime(p.uploadedAt)}`); }
       else if (f === 'more') feedMore(p);
+      else if (f === 'mute') {
+        feedMuted = !feedMuted;
+        $$('#feed video').forEach(v => { v.muted = feedMuted; });
+        $$('#feed [data-f="mute"]').forEach(x => { x.innerHTML = `<span class="bub">${icon(feedMuted ? 'volume-x' : 'volume')}</span><span>${feedMuted ? 'Suara' : 'Bisukan'}</span>`; });
+        const v = $('video', sec); if (v && v.paused) feedPlay(sec);
+      }
       return;
     }
     const now = Date.now();
@@ -460,6 +488,11 @@ function bindFeed(feed) {
       burst(sec, e);
     } else {
       lastTap = now;
+      const v = $('video', sec);
+      if (v) tapTimer = setTimeout(() => {
+        if (v.paused) { v.muted = feedMuted; v.play().catch(() => { v.muted = true; v.play().catch(() => {}); }); feedInd(sec, true); }
+        else { v.pause(); feedInd(sec, false); }
+      }, 300);
     }
   });
 }
@@ -471,7 +504,7 @@ function burst(sec, e) {
 }
 function feedMore(p) {
   actionSheet(p.name, [
-    { icon: 'zoom', label: 'Buka di penampil', sub: 'Zoom, putar, info lengkap', fn: () => openViewer(feedList.map(x => x.id), feedList.findIndex(x => x.id === p.id)) },
+    { icon: 'zoom', label: 'Buka di penampil', sub: isVideo(p) ? 'Layar penuh dengan kontrol video' : 'Zoom, putar, info lengkap', fn: () => openViewer(feedList.map(x => x.id), feedList.findIndex(x => x.id === p.id)) },
     { icon: 'tag', label: 'Deskripsi & tag', fn: () => A.editDescTags(p) },
     { icon: 'album', label: 'Pindah ke album', fn: () => A.chooseAlbum([p.id]) },
     { icon: 'edit', label: 'Ganti nama', fn: () => A.rename(p) },
@@ -491,6 +524,7 @@ function applyFilters(list) {
   const q = f.q.trim().toLowerCase();
   if (q) list = list.filter(p => [p.name, p.desc, (p.tags || []).join(' '), p.memberName].join(' ').toLowerCase().includes(q.replace(/^#/, '')));
   if (f.member !== 'all') list = list.filter(p => p.memberId === f.member);
+  if (f.kind === 'video') list = list.filter(isVideo); else if (f.kind === 'photo') list = list.filter(p => !isVideo(p));
   const now = new Date(); const sod = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const ranges = { today: [sod, Infinity], d7: [Date.now() - 7 * 864e5, Infinity], d30: [Date.now() - 30 * 864e5, Infinity], year: [new Date(now.getFullYear(), 0, 1).getTime(), Infinity] };
   if (ranges[f.range]) { const [a, b] = ranges[f.range]; list = list.filter(p => p.uploadedAt >= a && p.uploadedAt < b); }
@@ -514,7 +548,8 @@ const colsSeg = () => `<div class="seg" data-cols>${[2, 3, 4, 6].map(c => `<butt
 
 function renderGallery(main) {
   const all = visible();
-  $('#topbar').innerHTML = topbarHTML(`Galeri <small>${all.length} foto</small>`, `<button class="icon-btn" data-select aria-label="Pilih">${icon('select')}</button>`);
+  const nVid = all.filter(isVideo).length;
+  $('#topbar').innerHTML = topbarHTML(`Galeri <small>${nVid ? `${all.length} item` : `${all.length} foto`}</small>`, `<button class="icon-btn" data-select aria-label="Pilih">${icon('select')}</button>`);
   if (!all.length) { main.innerHTML = emptyState('image', 'Belum ada foto', 'Foto yang kamu unggah akan muncul di sini, rapi per bulan.', uploadBtn()); return; }
   const f = S.filters;
   main.innerHTML = `
@@ -525,13 +560,14 @@ function renderGallery(main) {
       ${colsSeg()}
     </div>
     ${f.range === 'custom' ? `<div class="date-range">${icon('calendar', 'sm')}<input type="date" id="from" value="${f.from}"> – <input type="date" id="to" value="${f.to}"></div>` : ''}
+    <div class="chips" id="kchips">${[['all', 'Semua jenis'], ['photo', '📷 Foto'], ['video', '🎬 Video']].map(([k, l]) => `<button class="chip ${(f.kind || 'all') === k ? 'active' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
     <div class="chips" id="mchips"><button class="chip ${f.member === 'all' ? 'active' : ''}" data-m="all">Semua</button>${S.members.map(m => `<button class="chip ${f.member === m.id ? 'active' : ''}" data-m="${m.id}">${esc(m.emoji)} ${esc(m.name)}</button>`).join('')}</div>
     <div id="gres"></div>`;
   const res = $('#gres', main);
   const draw = () => {
     const list = applyFilters(visible());
     if (!list.length) { res.innerHTML = emptyState('search', 'Tidak ditemukan', 'Coba kata kunci atau filter lain.'); return; }
-    const filtered = f.q || f.member !== 'all' || f.range !== 'all';
+    const filtered = f.q || f.member !== 'all' || f.range !== 'all' || (f.kind && f.kind !== 'all');
     const pinned = !filtered && ['new', 'old', 'taken'].includes(f.sort) ? list.filter(p => p.pinned) : [];
     const rest = pinned.length ? list.filter(p => !p.pinned) : list;
     let html = '';
@@ -547,6 +583,7 @@ function renderGallery(main) {
   $('#sort', main).onchange = e => { f.sort = e.target.value; sfx('tap'); draw(); };
   $('#range', main).onchange = e => { f.range = e.target.value; sfx('tap'); render(); };
   if ($('#from', main)) { $('#from', main).onchange = e => { f.from = e.target.value; draw(); }; $('#to', main).onchange = e => { f.to = e.target.value; draw(); }; }
+  $$('#kchips [data-k]', main).forEach(b => b.onclick = () => { f.kind = b.dataset.k; sfx('tap'); $$('#kchips .chip', main).forEach(x => x.classList.toggle('active', x === b)); draw(); });
   $$('#mchips [data-m]', main).forEach(b => b.onclick = () => { f.member = b.dataset.m; sfx('tap'); $$('#mchips .chip', main).forEach(x => x.classList.toggle('active', x === b)); draw(); });
   bindCols(main, draw);
 }
@@ -645,7 +682,7 @@ function renderMemories(main) {
     ${sections.map(([title, ic, list, cap], si) => list.length ? `
       <div class="section-title">${icon(ic, 'sm')} ${title} <span class="sub">${list.length}</span>
         <button class="btn sm ghost right" data-ss="${si}">${icon('play', 'sm')} Putar</button></div>
-      <div class="mem-row">${list.map(p => `<button class="mem-card" data-mem="${si}" data-id="${p.id}"><img data-thumb="${p.id}" alt=""><div class="cap">${esc(cap(p))}</div></button>`).join('')}</div>` : '').join('')}`;
+      <div class="mem-row">${list.map(p => `<button class="mem-card" data-mem="${si}" data-id="${p.id}"><img data-thumb="${p.id}" alt="">${isVideo(p) ? `<span class="vbadge">${icon('play', 'fill')}</span>` : ''}<div class="cap">${esc(cap(p))}</div></button>`).join('')}</div>` : '').join('')}`;
   hydrateThumbs(main);
   $('[data-hero]', main).onclick = () => openSlideshow(heroPool.map(p => p.id), { start: heroPool.indexOf(hero) });
   $$('[data-ss]', main).forEach(b => b.onclick = () => openSlideshow(sections[+b.dataset.ss][2].map(p => p.id)));
@@ -705,9 +742,10 @@ async function renderStats(main) {
   const card = (v, l, ic) => `<div class="stat">${icon(ic, 'sm')}<div class="v">${v}</div><div class="l">${l}</div></div>`;
   main.innerHTML = `
     <div class="stats-grid">
-      ${card(live.length, 'Total foto', 'image')}${card(fmtSize(total), 'Ukuran foto', 'database')}
+      ${card(live.filter(p => !isVideo(p)).length, 'Foto', 'image')}${card(live.filter(isVideo).length, 'Video', 'play')}
+      ${card(fmtSize(total), 'Ukuran total', 'database')}
       ${card(S.albums.length, 'Album', 'album')}${card(live.filter(p => p.fav).length, 'Favorit', 'star')}
-      ${card(likes, 'Total suka', 'heart')}${card(S.members.length, 'Anggota', 'users')}
+      ${card(likes, 'Total suka', 'heart')}${card(S.members.length, 'Anggota', 'users')}${card(fmtDur(live.filter(isVideo).reduce((a, p) => a + (p.duration || 0), 0)), 'Durasi video', 'clock')}
       ${card(live.filter(p => p.archived).length, 'Diarsipkan', 'archive')}${card(S.photos.filter(p => p.deleted).length, 'Di sampah', 'trash')}
     </div>
     <div class="section-title">${icon('chart', 'sm')} Foto per bulan <span class="sub">12 bulan terakhir</span></div>

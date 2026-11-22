@@ -21,7 +21,7 @@ Android (Chrome): menu ⋮ → **Instal aplikasi**.
 > Catatan: aplikasi web di iPhone tidak bisa berjalan di latar belakang, jadi sinkron terjadi ketika aplikasi dibuka. Untuk menyimpan foto ke app **Foto** iPhone: ketuk **Simpan** → **Simpan Gambar**.
 
 ## Fitur
-Feed ala TikTok (layar penuh, foto tidak terpotong), galeri 2/3/4/6 kolom, cari/sort/filter tanggal & anggota, pilih banyak + aksi massal, album + cover, favorit + slideshow bermusik, kenangan (hari ini tahun lalu, dll.), arsip, sampah (otomatis 30 hari) + urungkan, statistik + leaderboard, log aktivitas per anggota, penampil foto (swipe, zoom cubit/ketuk 2x, putar, bagikan, salin, unduh, ekspor metadata), profil anggota (emoji, warna, foto, password), PIN aplikasi, mode privat, scan duplikat, tema gelap/terang + warna aksen bebas, pintasan keyboard.
+Foto **dan video** (sampai 1 GB per video, putar otomatis di feed, kontrol video di penampil, ikut sinkron & slideshow), feed ala TikTok (layar penuh, tidak terpotong), galeri 2/3/4/6 kolom, cari/sort/filter tanggal & anggota, pilih banyak + aksi massal, album + cover, favorit + slideshow bermusik, kenangan (hari ini tahun lalu, dll.), arsip, sampah (otomatis 30 hari) + urungkan, statistik + leaderboard, log aktivitas per anggota, penampil foto (swipe, zoom cubit/ketuk 2x, putar, bagikan, salin, unduh, ekspor metadata), profil anggota (emoji, warna, foto, password), PIN aplikasi, mode privat, scan duplikat, tema gelap/terang + warna aksen bebas, pintasan keyboard.
 
 ## Pengembangan
 ```bash

@@ -228,7 +228,7 @@ export async function sharePhoto(p) {
 export async function copyPhoto(p) {
   // Try copying the image itself; WebViews often refuse, so fall back to text.
   try {
-    if (window.ClipboardItem && navigator.clipboard?.write) {
+    if (!(p.type || '').startsWith('video/') && window.ClipboardItem && navigator.clipboard?.write) {
       const blob = await rotatedBlob(p);
       const png = await toPng(blob);
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
@@ -248,7 +248,8 @@ async function toPng(blob) {
 export function photoMeta(p) {
   const a = albumById(p.albumId);
   return {
-    id: p.id, name: p.name, desc: p.desc || '', tags: p.tags || [], size: p.size, type: p.type, width: p.w, height: p.h,
+    id: p.id, name: p.name, kind: p.kind || 'photo', desc: p.desc || '', tags: p.tags || [], size: p.size, type: p.type, width: p.w, height: p.h,
+    duration: p.duration || null,
     uploaded_at: new Date(p.uploadedAt).toISOString(), taken_at: p.takenAt ? new Date(p.takenAt).toISOString() : null,
     album_id: p.albumId || null, album_name: a?.name || null, fav: !!p.fav, likes: p.likes || 0,
     liked_by: (p.likedBy || []).map(id => S.members.find(m => m.id === id)?.name || id),

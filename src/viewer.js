@@ -4,7 +4,7 @@
 // =====================================================================
 import {
   S, $, $$, el, esc, icon, toast, sfx, on, emit, openModal, actionSheet, thumbUrl, fullUrl, photoById, albumById, memberById,
-  fmtSize, fmtDateTime, native, audio, clamp
+  fmtSize, fmtDateTime, native, audio, clamp, isVideo, fmtDur
 } from './core.js';
 import * as A from './actions.js';
 
@@ -16,7 +16,7 @@ export function openViewer(ids, index = 0, { mode = 'normal' } = {}) {
   if (V) closeViewer(true);
   sfx('open');
   const root = el(`<div class="viewer">
-    <div class="v-stage"><div class="v-track"><img class="v-img" alt=""></div></div>
+    <div class="v-stage"><div class="v-track"><img class="v-img" alt=""><video class="v-img v-vid" playsinline webkit-playsinline controls preload="metadata" hidden></video></div></div>
     <div class="v-bar v-top">
       <button class="v-btn" data-v="close" aria-label="Tutup">${icon('left')}</button>
       <div class="tt"><b></b><small></small></div>
@@ -29,7 +29,10 @@ export function openViewer(ids, index = 0, { mode = 'normal' } = {}) {
   </div>`);
   document.body.appendChild(root);
   V = { root, ids, i: clamp(index, 0, ids.length - 1), mode, s: 1, tx: 0, ty: 0, dx: 0, dy: 0, dirty: false, token: 0 };
-  V.img = $('.v-img', root);
+  V.pic = $('img.v-img', root);
+  V.vid = $('video.v-img', root);
+  V.img = V.pic;
+  document.querySelectorAll('#feed video').forEach(v => { try { v.pause(); } catch { /* ignore */ } });
   V.unBack = native.onBack(() => { closeViewer(); return true; });
   V.onKey = onKey;
   document.addEventListener('keydown', onKey, true);
@@ -42,6 +45,7 @@ export function closeViewer(instant = false) {
   if (!V) return;
   const v = V; V = null;
   v.unBack(); document.removeEventListener('keydown', v.onKey, true);
+  try { v.vid.pause(); } catch { /* ignore */ }
   if (instant) v.root.remove();
   else { sfx('close'); v.root.classList.add('closing'); setTimeout(() => v.root.remove(), 180); }
   if (v.dirty) emit('change');
@@ -54,17 +58,33 @@ async function show() {
   V.s = 1; V.tx = V.ty = V.dx = V.dy = 0;
   const token = ++V.token;
   const r = p.rot || 0;
-  V.img.className = 'v-img' + (r === 90 || r === 270 ? ' r' + r : '');
+  const video = isVideo(p);
+  try { V.vid.pause(); } catch { /* ignore */ }
+  V.root.classList.toggle('is-video', video);
+  V.pic.hidden = video; V.vid.hidden = !video;
+  V.img = video ? V.vid : V.pic;
+  V.img.className = 'v-img' + (video ? ' v-vid' : '') + (r === 90 || r === 270 ? ' r' + r : '');
   applyTransform(false);
   V.img.style.opacity = '0';
   const t = await thumbUrl(p.id);
   if (!V || token !== V.token) return;
-  V.img.src = t; V.img.style.opacity = '1';
   paintBars();
-  const f = await fullUrl(p.id);
-  if (!V || token !== V.token) return;
-  if (f) { const pre = new Image(); pre.onload = () => { if (V && token === V.token) V.img.src = f; }; pre.src = f; }
-  [V.i + 1, V.i - 1].forEach(j => { const id = V.ids[j]; if (id) fullUrl(id); });
+  if (video) {
+    V.vid.poster = t || '';
+    V.vid.style.opacity = '1';
+    const f = await fullUrl(p.id);
+    if (!V || token !== V.token) return;
+    V.vid.src = f;
+    V.vid.muted = false;
+    V.vid.play().catch(() => { if (V && token === V.token) { V.vid.muted = true; V.vid.play().catch(() => {}); } });
+  } else {
+    V.vid.removeAttribute('src');
+    V.pic.src = t; V.pic.style.opacity = '1';
+    const f = await fullUrl(p.id);
+    if (!V || token !== V.token) return;
+    if (f) { const pre = new Image(); pre.onload = () => { if (V && token === V.token) V.pic.src = f; }; pre.src = f; }
+  }
+  [V.i + 1, V.i - 1].forEach(j => { const id = V.ids[j]; const q = id && photoById(id); if (q && !isVideo(q)) fullUrl(id); });
   A.markViewed(p);
 }
 
@@ -135,7 +155,7 @@ function bindGestures(stage) {
   const pts = new Map();
   let start = null, pinch = null, lastTap = 0, tapTimer = null;
   stage.addEventListener('pointerdown', e => {
-    stage.setPointerCapture?.(e.pointerId);
+    if (e.target.tagName !== 'VIDEO') stage.setPointerCapture?.(e.pointerId);
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 1) start = { x: e.clientX, y: e.clientY, t: Date.now(), tx: V.tx, ty: V.ty, moved: false, axis: null };
     if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), s: V.s, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }; V.dx = V.dy = 0; }
@@ -178,6 +198,7 @@ function bindGestures(stage) {
     V.dx = V.dy = 0;
     applyTransform(true);
     if (!st.moved && Date.now() - st.t < 300) {
+      if (e.target.tagName === 'VIDEO') return; // native video controls handle taps
       const now = Date.now();
       if (now - lastTap < 300) {
         clearTimeout(tapTimer); lastTap = 0;
@@ -191,6 +212,7 @@ function bindGestures(stage) {
   stage.addEventListener('pointerup', end);
   stage.addEventListener('pointercancel', end);
   stage.addEventListener('wheel', e => {
+    if (isVideo(cur())) return;
     e.preventDefault();
     zoomAt(e.clientX, e.clientY, clamp(V.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 1, 5));
     applyTransform(false);
@@ -205,6 +227,7 @@ function onKey(e) {
   if (k === 'ArrowRight') { handled(); step(1); }
   else if (k === 'ArrowLeft') { handled(); step(-1); }
   else if (k === 'Escape') { handled(); closeViewer(); }
+  else if (k === ' ' && isVideo(cur())) { handled(); V.vid.paused ? V.vid.play().catch(() => {}) : V.vid.pause(); }
   else if (k === '+' || k === '=') { handled(); V.s = clamp(V.s * 1.3, 1, 5); clampPan(); applyTransform(true); }
   else if (k === '-') { handled(); V.s = clamp(V.s / 1.3, 1, 5); if (V.s === 1) V.tx = V.ty = 0; clampPan(); applyTransform(true); }
   else if (k.toLowerCase() === 'r' && V.mode !== 'trash') { handled(); act('rotate'); }
@@ -262,12 +285,13 @@ function showInfo(p) {
   const likers = (p.likedBy || []).map(id => memberById(id)).filter(Boolean);
   sfx('open');
   const md = openModal({
-    sheet: true, title: 'Detail foto',
+    sheet: true, title: isVideo(p) ? 'Detail video' : 'Detail foto',
     body: `<dl class="info-meta" style="padding:0 8px">
         <dt>Nama</dt><dd>${esc(p.name)}</dd>
         <dt>Diunggah</dt><dd>${esc(m?.emoji || p.memberEmoji || '')} ${esc(m?.name || p.memberName || '-')} · ${fmtDateTime(p.uploadedAt)}</dd>
         ${p.takenAt ? `<dt>Tanggal file</dt><dd>${fmtDateTime(p.takenAt)}</dd>` : ''}
         <dt>Ukuran</dt><dd>${fmtSize(p.size)}${p.w ? ` · ${p.w}×${p.h}px` : ''}</dd>
+        ${isVideo(p) ? `<dt>Durasi</dt><dd>${fmtDur(p.duration)}</dd>` : ''}
         <dt>Tipe</dt><dd>${esc(p.type || '-')}</dd>
         <dt>Album</dt><dd>${a ? esc(a.name) : '—'}</dd>
         <dt>Disukai</dt><dd>${likers.length ? likers.map(x => `${esc(x.emoji)} ${esc(x.name)}`).join(', ') : '—'}</dd>
@@ -296,7 +320,7 @@ export function openSlideshow(ids, { shuffle = false, start = 0 } = {}) {
   if (shuffle) { ids = ids.slice(); for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; } start = 0; }
   sfx('open');
   const root = el(`<div class="slideshow">
-    <div class="ss-layer"><div class="bg"></div><img alt=""></div><div class="ss-layer"><div class="bg"></div><img alt=""></div>
+    <div class="ss-layer"><div class="bg"></div><img alt=""><video playsinline webkit-playsinline muted preload="auto" hidden></video></div><div class="ss-layer"><div class="bg"></div><img alt=""><video playsinline webkit-playsinline muted preload="auto" hidden></video></div>
     <div class="ss-progress"><i></i></div>
     <div class="ss-ui">
       <div class="ss-top"><button class="v-btn" data-s="close">${icon('x')}</button><b>Slideshow</b>
@@ -356,17 +380,31 @@ async function showSlide() {
   const layers = $$('.ss-layer', SS.root);
   const nextL = layers[1 - SS.layer], prevL = layers[SS.layer];
   const r = p.rot || 0;
-  nextL.className = 'ss-layer kb' + (r === 90 || r === 270 ? ' r' + r : '');
+  const video = isVideo(p);
+  nextL.className = 'ss-layer' + (video ? '' : ' kb') + (r === 90 || r === 270 ? ' r' + r : '');
   nextL.style.setProperty('--rot', r + 'deg');
   nextL.style.setProperty('--dur', (SS.speed + 1.5) + 's');
-  const url = await fullUrl(p.id) || await thumbUrl(p.id);
   const t = await thumbUrl(p.id);
+  const url = await fullUrl(p.id) || t;
   if (!SS) return;
-  const img = $('img', nextL);
-  await new Promise(res => { img.onload = img.onerror = res; img.src = url; });
-  if (!SS) return;
+  const img = $('img', nextL), vid = $('video', nextL);
+  img.hidden = video; vid.hidden = !video;
+  SS.slideDur = SS.speed;
+  if (video) {
+    vid.poster = t || '';
+    await new Promise(res => { vid.onloadeddata = vid.onerror = res; vid.src = url; setTimeout(res, 4000); });
+    if (!SS) return;
+    vid.currentTime = 0; vid.muted = true; vid.loop = false;
+    vid.play().catch(() => {});
+    // show the video until it ends (max 30 s), then continue the slideshow
+    SS.slideDur = Math.max(SS.speed, Math.min(30, p.duration || vid.duration || SS.speed));
+  } else {
+    await new Promise(res => { img.onload = img.onerror = res; img.src = url; });
+    if (!SS) return;
+  }
   $('.bg', nextL).style.backgroundImage = `url("${t}")`;
   nextL.classList.add('show'); prevL.classList.remove('show');
+  const oldV = $('video', prevL); setTimeout(() => { try { if (!oldV.hidden) oldV.pause(); } catch { /* ignore */ } }, 1200);
   SS.layer = 1 - SS.layer;
   $('.ss-cap', SS.root).innerHTML = `${esc(p.desc || p.name)}<small>${esc(p.memberEmoji || '')} ${esc(p.memberName || '')} · ${SS.i + 1}/${SS.ids.length}</small>`;
   A.markViewed(p);
@@ -380,8 +418,9 @@ function schedule() {
   bar.style.transition = 'none'; bar.style.width = '0';
   if (!SS.playing) return;
   void bar.offsetWidth;
-  bar.style.transition = `width ${SS.speed}s linear`; bar.style.width = '100%';
-  SS.timer = setTimeout(() => ssStep(1, true), SS.speed * 1000);
+  const d = SS.slideDur || SS.speed;
+  bar.style.transition = `width ${d}s linear`; bar.style.width = '100%';
+  SS.timer = setTimeout(() => ssStep(1, true), d * 1000);
 }
 function ssStep(d, auto = false) {
   if (!SS) return;
@@ -391,6 +430,8 @@ function ssStep(d, auto = false) {
 }
 function ssToggle() {
   SS.playing = !SS.playing; paintSS(); schedule();
+  const v = $$('.ss-layer', SS.root)[SS.layer]?.querySelector('video');
+  if (v && !v.hidden) { SS.playing ? v.play().catch(() => {}) : v.pause(); }
   if (SS.playing) autoHide(); else SS.root.classList.remove('ui-hidden');
   audio.duckMusic(!SS.playing);
 }
@@ -398,6 +439,7 @@ export function closeSlideshow() {
   if (!SS) return;
   const s = SS; SS = null;
   clearTimeout(s.timer); clearTimeout(s.hideT);
+  s.root.querySelectorAll('video').forEach(v => { try { v.pause(); } catch { /* ignore */ } });
   s.unBack(); document.removeEventListener('keydown', s.onKey, true);
   audio.stopMusic(0.6); audio.duckMusic(false);
   sfx('close');

@@ -101,7 +101,7 @@ function bindKeys() {
 function bindDrop() {
   window.addEventListener('dragover', e => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
   window.addEventListener('drop', e => {
-    const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith('image/'));
+    const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
     if (!files.length) return;
     e.preventDefault();
     uploadFiles(files, { albumId: S.view === 'album' ? S.param : null });

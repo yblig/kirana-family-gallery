@@ -9,7 +9,7 @@
 import { joinRoom, getRelaySockets } from 'trystero';
 import {
   S, db, emit, hooks, savePhotos, saveAlbum, saveMember, removePhotosForever, deleteRecords, getBlob, photoById,
-  decodeImage, makeThumb, sha256, setSetting, debounce, toast
+  decodeImage, makeThumb, sha256, setSetting, debounce, toast, isVideo, videoInfo
 } from './core.js';
 
 const APP_ID = 'yblig.kirana-family-gallery.v1';
@@ -44,7 +44,7 @@ export async function startSync() {
   try {
     const roomId = (await sha256('kfg-room:' + S.settings.familyCode)).slice(0, 24);
     // more relays = better chance both phones meet even if some public relays are down
-    room = joinRoom({ appId: APP_ID, password: 'kfg:' + S.settings.familyCode, relayConfig: { redundancy: 10, warnOnRelayFailure: false } }, roomId);
+    room = joinRoom({ appId: APP_ID, password: 'kfg:' + S.settings.familyCode, relayConfig: { redundancy: 10, warnOnRelayFailure: false }, maxReceiveBytes: 1100 * 1024 * 1024 }, roomId);
     A = {
       manifest: room.makeAction('manifest'),
       meta: room.makeAction('meta'),
@@ -220,12 +220,16 @@ async function work() {
     if (!rec || !peers.has(peerId)) { queue.shift(); if (rec) missing.add(id); continue; }
     sync.receiving = 1; sync.queued = queue.length; notify();
     try {
-      const res = await A.blob.request({ id }, { target: peerId, timeoutMs: 180000 });
+      // big videos need longer: allow ~40 KB/s worst case
+      const res = await A.blob.request({ id }, { target: peerId, timeoutMs: 180000 + Math.ceil((rec.size || 0) / 40000) * 1000 });
       const blob = res instanceof Blob ? res : (res && (res.byteLength || res.size)) ? new Blob([res], { type: rec.type || 'image/jpeg' }) : null;
       if (blob && blob.size) {
         const typed = blob.type ? blob : new Blob([blob], { type: rec.type || 'image/jpeg' });
         let thumb = typed;
-        try { const img = await decodeImage(typed); thumb = await makeThumb(img, 500, 0.82); img.close?.(); } catch { /* keep original as thumb */ }
+        try {
+          if (isVideo(rec)) thumb = (await videoInfo(typed)).thumb;
+          else { const img = await decodeImage(typed); thumb = await makeThumb(img, 500, 0.82); img.close?.(); }
+        } catch { /* keep original as thumb */ }
         if (S.pending.has(id)) {
           await db.put('blobs', { id, blob: typed, thumb });
           const { pending, ...meta } = S.pending.get(id);
@@ -248,7 +252,7 @@ export function syncSummary() {
   if (sync.status === 'off') return S.settings.familyCode ? 'Sinkron dimatikan' : 'Belum terhubung ke keluarga';
   if (sync.status === 'unsupported') return 'Browser ini tidak mendukung sinkron';
   if (sync.status === 'error') return 'Gagal menyambung' + (sync.error ? ` (${sync.error})` : '') + ' — ketuk Sinkron sekarang';
-  if (sync.receiving || sync.queued) return `Menerima foto… (${n} tersisa)`;
+  if (sync.receiving || sync.queued) return `Menerima foto/video… (${n} tersisa)`;
   if (sync.status === 'connected') return `Tersambung dengan ${sync.peers} HP keluarga${n ? ` · ${n} foto menunggu` : ' · semua sudah sinkron'}`;
   return `Mencari HP keluarga yang sedang online…${n ? ` · ${n} foto menunggu` : ''}`;
 }
