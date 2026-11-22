@@ -100,7 +100,7 @@ function bindKeys() {
     if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
     if (overlayOpen() || viewerOpen()) return;
     const k = e.key.toLowerCase();
-    const map = { f: 'feed', g: 'gallery', a: 'albums', v: 'favorites', m: 'memories', r: 'archive', t: 'trash', l: 'log', s: 'stats', ',': 'settings' };
+    const map = { f: 'feed', g: 'gallery', a: 'albums', v: 'favorites', m: 'memories', o: 'people', r: 'archive', t: 'trash', l: 'log', s: 'stats', ',': 'settings' };
     if (map[k]) { e.preventDefault(); go(map[k]); }
     else if (k === '/') { e.preventDefault(); focusSearch(); }
     else if (k === 'u') { e.preventDefault(); startUpload(); }

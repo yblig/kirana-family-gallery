@@ -8,7 +8,7 @@
 // =====================================================================
 import { joinRoom, getRelaySockets } from 'trystero';
 import {
-  S, db, emit, hooks, savePhotos, saveAlbum, saveMember, removePhotosForever, deleteRecords, getBlob, photoById,
+  S, db, emit, hooks, savePhotos, saveAlbum, saveMember, savePerson, removePhotosForever, deleteRecords, getBlob, photoById,
   decodeImage, makeThumb, sha256, setSetting, debounce, toast, isVideo, videoInfo
 } from './core.js';
 
@@ -120,6 +120,7 @@ function manifest() {
     photos,
     albums: Object.fromEntries(S.albums.map(a => [a.id, a.updatedAt || 0])),
     members: Object.fromEntries(S.members.map(m => [m.id, m.updatedAt || 0])),
+    people: Object.fromEntries(S.people.map(m => [m.id, m.updatedAt || 0])),
     logs: S.logs.map(l => l.id),
     tombs: Object.fromEntries(S.tombs)
   };
@@ -128,8 +129,8 @@ async function sendMeta(delta, target) {
   if (!A || !peers.size) return;
   const opts = target ? { target } : undefined;
   // batch big payloads so no single message gets huge
-  const keys = ['photos', 'albums', 'members', 'logs'];
-  const size = { photos: 150, albums: 200, members: 50, logs: 400 };
+  const keys = ['photos', 'albums', 'members', 'people', 'logs'];
+  const size = { photos: 60, albums: 200, members: 50, people: 20, logs: 400 };
   const tombs = delta.tombs && Object.keys(delta.tombs).length ? delta.tombs : null;
   if (tombs) await A.meta.send({ tombs }, opts).catch(() => {});
   for (const k of keys) {
@@ -148,6 +149,7 @@ async function onManifest(m, peerId) {
     photos: [...S.photos, ...S.pending.values()].filter(p => newer(p.updatedAt, m.photos?.[p.id]?.[0])),
     albums: S.albums.filter(a => newer(a.updatedAt, m.albums?.[a.id])),
     members: S.members.filter(x => newer(x.updatedAt, m.members?.[x.id])),
+    people: S.people.filter(x => newer(x.updatedAt, m.people?.[x.id])),
     logs: (() => { const have = new Set(m.logs || []); return S.logs.filter(l => !have.has(l.id)); })()
   };
   await sendMeta(out, peerId);
@@ -163,7 +165,7 @@ async function applyMeta(m, peerId) {
     S.tombs.set(id, ts); await db.put('tombs', { id, ts });
     const p = photoById(id) || S.pending.get(id);
     if (p && (p.updatedAt || 0) <= ts) { await removePhotosForever([id], { remote: true }); touched = true; }
-    for (const store of ['albums', 'members', 'logs']) {
+    for (const store of ['albums', 'members', 'people', 'logs']) {
       const rec = S[store].find(x => x.id === id);
       if (rec && (rec.updatedAt || 0) <= ts) { await deleteRecords(store, [id], { remote: true }); touched = true; }
     }
@@ -183,7 +185,7 @@ async function applyMeta(m, peerId) {
     }
     touched = true;
   }
-  for (const [store, save] of [['albums', saveAlbum], ['members', saveMember]]) {
+  for (const [store, save] of [['albums', saveAlbum], ['members', saveMember], ['people', savePerson]]) {
     for (const rec of m[store] || []) {
       if (!rec?.id || dead(rec)) continue;
       const local = S[store].find(x => x.id === rec.id);

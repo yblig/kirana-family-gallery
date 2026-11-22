@@ -11,6 +11,7 @@ import * as A from './actions.js';
 import { startUpload, uploadMenu, exportBackup, importBackup, storageInfo } from './io.js';
 import { openViewer, openSlideshow, viewerOpen } from './viewer.js';
 import { showMemberPicker, editMember, deleteMember, lockApp, setupPin, verifyPin } from './members.js';
+import * as F from './faces.js';
 import { sync, syncSummary, familyLink, setFamilyCode, startSync, stopSync, validCode, normCode, newCode, resyncNow, relayInfo } from './sync.js';
 
 const NAV = [
@@ -19,6 +20,7 @@ const NAV = [
   { id: 'albums', label: 'Album', icon: 'album', key: 'A' },
   { id: 'favorites', label: 'Favorit', icon: 'heart', key: 'V' },
   { id: 'memories', label: 'Kenangan', icon: 'sparkles', key: 'M' },
+  { id: 'people', label: 'Orang', icon: 'user', key: 'O' },
   { id: 'archive', label: 'Arsip', icon: 'archive', key: 'R' },
   { id: 'trash', label: 'Sampah', icon: 'trash', key: 'T' },
   { id: 'log', label: 'Log Aktivitas', icon: 'activity', key: 'L' },
@@ -43,6 +45,7 @@ const navStack = [];
 export function goBack() {
   if (S.selecting) { exitSelection(); return true; }
   if (S.view === 'album') { go('albums', null, { push: false }); return true; }
+  if (S.view === 'person') { go('people', null, { push: false }); return true; }
   if (S.view !== 'feed') { go('feed', null, { push: false }); return true; }
   return false;
 }
@@ -57,11 +60,11 @@ function counts() {
 
 function renderSidebar() {
   const c = counts();
-  const active = S.view === 'album' ? 'albums' : S.view;
+  const active = S.view === 'album' ? 'albums' : S.view === 'person' ? 'people' : S.view;
   $('#sidebar').innerHTML = `
     <div class="brand"><span class="brand-mark">${icon('image')}</span><div>KIRANA<small>FAMILY GALLERY</small></div></div>
     <button class="btn primary block" data-upload style="margin-bottom:12px">${icon('upload', 'sm')} Unggah Foto/Video</button>
-    ${NAV.map((n, i) => `${i === 4 || i === 7 ? '<div class="side-sep"></div>' : ''}<button class="side-item ${active === n.id ? 'active' : ''}" data-go="${n.id}">${icon(n.icon)}<span>${n.label}</span>${c[n.id] != null ? `<span class="count">${c[n.id]}</span>` : ''}</button>`).join('')}
+    ${NAV.map((n, i) => `${i === 4 || i === 8 ? '<div class="side-sep"></div>' : ''}<button class="side-item ${active === n.id ? 'active' : ''}" data-go="${n.id}">${icon(n.icon)}<span>${n.label}</span>${c[n.id] != null ? `<span class="count">${c[n.id]}</span>` : ''}</button>`).join('')}
     <div class="side-sep"></div>
     <button class="side-item" data-sync>${icon('users')}<span>Sinkron Keluarga</span></button>
     <button class="side-item" data-upfiles>${icon('upload')}<span>Unggah dari File</span></button>
@@ -158,6 +161,7 @@ function topbarHTML(title, extra = '') {
 export function openMore() {
   actionSheet('Lainnya', [
     { icon: 'sparkles', label: 'Kenangan', color: 'pink', fn: () => go('memories') },
+    { icon: 'user', label: 'Orang', color: 'blue', fn: () => go('people') },
     { icon: 'archive', label: 'Arsip', color: 'blue', fn: () => go('archive') },
     { icon: 'trash', label: 'Sampah', color: 'red', fn: () => go('trash') },
     { icon: 'activity', label: 'Log', color: 'green', fn: () => go('log') },
@@ -894,6 +898,15 @@ async function renderSettings(main) {
       <div class="row"><span class="ri green">${icon('trash', 'sm')}</span><span class="rt"><b>Sampah otomatis</b><small>Foto di Sampah dihapus permanen setelah 30 hari</small></span><span class="rv">Aktif</span></div>
     </div>
 
+    <div class="group-label">Pengenal wajah</div>
+    <div class="list">
+      <button class="row" data-go="people"><span class="ri">${icon('user', 'sm')}</span><span class="rt"><b>Orang & sampel wajah</b><small>${S.people.length} orang</small></span><span class="rv">${icon('right', 'sm')}</span></button>
+      <button class="row" data-act="faceauto"><span class="ri">${icon('sparkles', 'sm')}</span><span class="rt"><b>Tag wajah otomatis saat upload</b><small>Dicek di HP ini, tanpa server</small></span>${sw(s.faceAuto !== false)}</button>
+      <div class="row"><span class="ri">${icon('filter', 'sm')}</span><span class="rt"><b>Kecocokan</b><small>Ketat = lebih sedikit salah tebak</small></span>
+        <div class="seg">${[['ketat', 'Ketat'], ['normal', 'Normal'], ['longgar', 'Longgar']].map(([k, l]) => `<button class="${(s.faceStrict || 'normal') === k ? 'active' : ''}" data-strict="${k}">${l}</button>`).join('')}</div></div>
+      <button class="row" data-act="facescan"><span class="ri">${icon('search', 'sm')}</span><span class="rt"><b>Pindai semua foto</b><small>Cari wajah di foto yang sudah ada</small></span></button>
+    </div>
+
     <div class="group-label">Suara & getar</div>
     <div class="list">
       <button class="row" data-act="sound"><span class="ri">${icon('volume', 'sm')}</span><span class="rt"><b>Efek suara</b></span>${sw(s.sound)}</button>
@@ -931,6 +944,7 @@ async function renderSettings(main) {
   $$('[data-medit]', main).forEach(b => b.onclick = async () => { if (await editMember(memberById(b.dataset.medit))) render(); });
   $$('[data-mdel]', main).forEach(b => b.onclick = async () => { if (await deleteMember(memberById(b.dataset.mdel))) render(); });
   $$('[data-act]', main).forEach(b => b.onclick = () => settingsAction(b.dataset.act));
+  $$('[data-strict]', main).forEach(b => b.onclick = async () => { setSetting('faceStrict', b.dataset.strict); sfx('tap'); render(); const n = await F.rematchAll(); toast(`Kecocokan: ${b.textContent}${n ? ` · ${n} foto diperbarui` : ''}`); });
 }
 async function settingsAction(act) {
   const s = S.settings;
@@ -957,6 +971,8 @@ async function settingsAction(act) {
     case 'keys': showShortcuts(); break;
     case 'wipe': wipeAll(); break;
     case 'install': showInstallHelp(true); break;
+    case 'faceauto': toggle('faceAuto'); break;
+    case 'facescan': F.scanLibrary(); break;
   }
 }
 export async function showInstallHelp(fromSettings = false) {
@@ -996,7 +1012,60 @@ async function wipeAll() {
 }
 
 // ----------------------------- Views table ---------------------------
+// ----------------------------- People (face recognition) ------------
+function renderPeople(main) {
+  $('#topbar').innerHTML = topbarHTML(`Orang <small>${S.people.length}</small>`, `<button class="btn sm" data-newperson>${icon('plus', 'sm')} Orang</button>`);
+  const counts = F.peopleSummary();
+  const scanned = S.photos.filter(p => !p.deleted && p.facesScanned).length, all = S.photos.filter(p => !p.deleted).length;
+  const intro = `<div class="card face-intro">
+      <b>${icon('user', 'sm')} Kenali wajah otomatis</b>
+      <p class="hint" style="margin:6px 0 10px;line-height:1.5">1. Tambah orang (mis. “Kirana”).<br>2. Buka fotonya → <b>Tandai wajah</b> → ketuk wajahnya, atau gambar <b>kotak manual</b> untuk memotong wajah di foto ramai.<br>3. Setiap foto yang diupload otomatis dicek & diberi tag nama orang yang dikenali.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm primary" data-newperson>${icon('plus', 'sm')} Tambah orang</button>
+      ${all ? `<button class="btn sm" data-scanall>${icon('search', 'sm')} Pindai semua foto (${scanned}/${all})</button>` : ''}</div></div>`;
+  if (!S.people.length) { main.innerHTML = intro; bindPeople(main); return; }
+  main.innerHTML = `<div class="people">${S.people.map(pr => `<button class="person-card" data-person="${pr.id}">${F.personAvatar(pr, 'xl')}<b>${esc(pr.name)}</b><small>${counts[pr.id] || 0} foto · ${(pr.samples || []).length} sampel</small></button>`).join('')}
+    <button class="person-card add" data-newperson><span class="avatar xl">${icon('plus', 'lg')}</span><b>Tambah</b><small>&nbsp;</small></button></div>
+    <div style="height:14px"></div>${intro}`;
+  bindPeople(main);
+}
+function bindPeople(main) {
+  $$('[data-person]', main).forEach(b => b.onclick = () => { sfx('tap'); go('person', b.dataset.person); });
+  $$('[data-newperson]').forEach(b => b.onclick = async () => { sfx('tap'); const pr = await F.createPerson(); if (pr) { go('person', pr.id); setTimeout(() => addSampleFlow(pr), 250); } });
+  $$('[data-scanall]', main).forEach(b => b.onclick = () => { sfx('tap'); F.scanLibrary(); });
+}
+async function addSampleFlow(pr) {
+  const list = visible().filter(p => !p.unsupported).sort((a, b) => b.uploadedAt - a.uploadedAt);
+  if (!list.length) { toast('Unggah foto dulu, lalu tandai wajah di fotonya'); return; }
+  const ids = await A.pickPhotos(`Pilih foto yang ada wajah ${pr.name}`, list, { single: true });
+  if (ids?.[0]) await F.openFaceTagger(photoById(ids[0]), { personId: pr.id });
+}
+function renderPerson(main) {
+  const person = S.people.find(x => x.id === S.param);
+  if (!person) { go('people', null, { push: false }); return; }
+  const list = F.photosOf(person.id);
+  $('#topbar').innerHTML = `<button class="icon-btn" data-back>${icon('left')}</button>` + topbarHTML(`${esc(person.name)} <small>${list.length} foto</small>`, `<button class="icon-btn" data-pmenu>${icon('more-v')}</button>`);
+  main.innerHTML = `
+    <div class="card" style="display:flex;gap:14px;align-items:center">${F.personAvatar(person, 'lg')}
+      <div style="flex:1;min-width:0"><div style="font-size:20px;font-weight:900">${esc(person.name)}</div>
+      <div class="hint">Tag otomatis: #${esc(F.personTag(person.name))}</div>
+      <button class="btn sm primary" data-addsample style="margin-top:8px">${icon('plus', 'sm')} Tambah sampel wajah</button></div></div>
+    <div class="section-title">${icon('user', 'sm')} Sampel wajah <span class="sub">${(person.samples || []).length} · makin banyak makin akurat</span></div>
+    ${(person.samples || []).length ? `<div class="samples">${person.samples.map(sm => `<div class="sample"><img src="${sm.t}" alt=""><button data-rms="${sm.id}" aria-label="Hapus sampel">${icon('x')}</button></div>`).join('')}</div>`
+      : '<p class="hint" style="margin:0 2px 8px">Belum ada sampel. Ketuk “Tambah sampel wajah”, pilih foto, lalu ketuk wajahnya.</p>'}
+    <div class="section-title">${icon('image', 'sm')} Foto dengan ${esc(person.name)} <span class="sub">${list.length}</span></div>
+    ${list.length ? gridHTML(list) : emptyState('user', 'Belum ada foto', `Setelah ada sampel wajah, foto yang berisi ${person.name} akan muncul di sini.`)}`;
+  bindGrid(main);
+  $('[data-addsample]', main).onclick = () => { sfx('tap'); addSampleFlow(person); };
+  $$('[data-rms]', main).forEach(b => b.onclick = async () => { if (await confirmDialog('Hapus sampel wajah ini?', { okLabel: 'Hapus', danger: true })) { await F.removeSample(person, b.dataset.rms); render(); } });
+  $('[data-pmenu]').onclick = () => actionSheet(person.name, [
+    { icon: 'edit', label: 'Ganti nama', fn: async () => { await F.renamePerson(person); render(); } },
+    { icon: 'play', label: 'Slideshow', fn: () => list.length ? openSlideshow(list.map(p => p.id)) : toast('Belum ada foto') },
+    { icon: 'trash', label: 'Hapus orang', danger: true, fn: async () => { if (await F.deletePerson(person)) go('people', null, { push: false }); } }
+  ]);
+}
+
 const VIEWS = {
+  people: renderPeople, person: renderPerson,
   feed: renderFeed, gallery: renderGallery, albums: renderAlbums, album: renderAlbum, favorites: renderFavorites,
   memories: renderMemories, archive: renderArchive, trash: renderTrash, log: renderLog, stats: renderStats, settings: renderSettings
 };

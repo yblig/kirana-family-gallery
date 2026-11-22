@@ -95,6 +95,7 @@ export async function uploadFiles(files, { albumId = null } = {}) {
     sfx('success');
     toast(`${what} berhasil diunggah${dup ? ` · ${dup} mungkin duplikat` : ''}`, { type: 'success', duration: 3200 });
   }
+  if (added.length) import('./faces.js').then(F => F.autoScan(added.filter(p => !p.unsupported).map(p => p.id))).catch(() => {});
   if (tooBig) toast(`${tooBig} video lebih dari 1 GB dilewati`, { type: 'error', duration: 3800 });
   if (full) openModal({ title: 'Penyimpanan HP penuh', body: `<p class="msg">${failedNames.length} file tidak tersimpan karena ruang penyimpanan browser/HP habis. Kosongkan Sampah atau hapus video besar, lalu coba lagi.</p>`, actions: [{ label: 'OK', cls: 'primary' }] });
   else if (failed) openModal({ title: `${failed} file gagal diunggah`, body: `<p class="msg" style="margin-bottom:8px">File berikut tidak bisa dibaca (mungkin rusak atau belum selesai terunduh dari iCloud). Coba unggah ulang:</p><p class="hint" style="word-break:break-all">${failedNames.map(esc).join('<br>')}</p>`, actions: [{ label: 'OK', cls: 'primary' }] });
@@ -119,7 +120,7 @@ export function uploadMenu({ albumId = null } = {}) {
 const MAGIC = 'kirana-family-gallery';
 
 async function* backupChunks(onPhoto) {
-  const head = { app: MAGIC, version: 1, exportedAt: new Date().toISOString(), members: S.members, albums: S.albums, logs: S.logs };
+  const head = { app: MAGIC, version: 1, exportedAt: new Date().toISOString(), members: S.members, albums: S.albums, logs: S.logs, people: S.people };
   yield JSON.stringify(head).slice(0, -1) + ',"photos":[';
   for (let i = 0; i < S.photos.length; i++) {
     const p = S.photos[i];
@@ -195,6 +196,8 @@ export async function importBackup() {
   try {
     for (const m of data.members || []) if (m?.id && !S.members.some(x => x.id === m.id)) { await saveMember(m); addedM++; }
     for (const a of data.albums || []) if (a?.id && !S.albums.some(x => x.id === a.id)) { await saveAlbum(a); addedA++; }
+    const { savePerson } = await import('./core.js');
+    for (const pr of data.people || []) if (pr?.id && !S.people.some(x => x.id === pr.id)) await savePerson(pr);
     const logIds = new Set(S.logs.map(l => l.id));
     const newLogs = (data.logs || []).filter(l => l?.id && !logIds.has(l.id));
     if (newLogs.length) { await db.putMany('logs', newLogs); S.logs.push(...newLogs); S.logs.sort((a, b) => b.ts - a.ts); addedL = newLogs.length; }

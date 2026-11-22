@@ -97,13 +97,13 @@ export function safeName(n) { return String(n).replace(/[\\/:*?"<>|]+/g, '_').sl
 
 // ----------------------------- DB wrapper ----------------------------
 const DB_NAME = 'kirana-gallery';
-const STORES = ['photos', 'blobs', 'albums', 'members', 'logs', 'tombs'];
+const STORES = ['photos', 'blobs', 'albums', 'members', 'logs', 'tombs', 'people'];
 let _db = null;
 export const db = {
   open() {
     if (_db) return Promise.resolve(_db);
     return new Promise((res, rej) => {
-      const req = indexedDB.open(DB_NAME, 2);
+      const req = indexedDB.open(DB_NAME, 3);
       req.onupgradeneeded = () => {
         const d = req.result;
         STORES.forEach(s => { if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' }); });
@@ -145,7 +145,7 @@ export const db = {
 
 // ----------------------------- State ---------------------------------
 export const S = {
-  photos: [], albums: [], members: [], logs: [],
+  photos: [], albums: [], members: [], logs: [], people: [],
   pending: new Map(), // photo records received from family whose image is still downloading
   tombs: new Map(),   // id -> deletedAt, so permanent deletes spread to other phones
   member: null,
@@ -155,7 +155,7 @@ export const S = {
   logFilter: 'all',
   settings: {}
 };
-const DEFAULTS = { theme: 'dark', accent: '#7c5cff', cols: 3, private: false, pin: '', lockOnResume: true, sound: true, haptics: true, memberId: '', familyCode: '', syncOn: true, syncIntro: false, feedMode: 'shuffle' };
+const DEFAULTS = { theme: 'dark', accent: '#7c5cff', cols: 3, private: false, pin: '', lockOnResume: true, sound: true, haptics: true, memberId: '', familyCode: '', syncOn: true, syncIntro: false, feedMode: 'shuffle', faceAuto: true, faceStrict: 'normal' };
 export function loadSettings() { S.settings = { ...DEFAULTS, ...storage.get('settings', {}) }; }
 export function setSetting(k, v) { S.settings[k] = v; storage.set('settings', S.settings); }
 
@@ -166,7 +166,8 @@ export const live = () => S.photos.filter(p => !p.deleted);
 export const visible = () => S.photos.filter(p => !p.deleted && !p.archived);
 
 export async function loadAll() {
-  const [photos, albums, members, logs, tombs] = await Promise.all(['photos', 'albums', 'members', 'logs', 'tombs'].map(s => db.all(s)));
+  const [photos, albums, members, logs, tombs, people] = await Promise.all(['photos', 'albums', 'members', 'logs', 'tombs', 'people'].map(s => db.all(s)));
+  S.people = people.sort((a, b) => a.name.localeCompare(b.name, 'id'));
   S.photos = photos.filter(p => !p.pending);
   S.pending = new Map(photos.filter(p => p.pending).map(p => [p.id, p]));
   S.albums = albums.sort((a, b) => b.createdAt - a.createdAt);
@@ -211,6 +212,8 @@ export async function deleteRecords(store, ids, o = {}) {
   if (!o.remote) await addTombs(ids, o);
 }
 export async function saveAlbum(a, o = {}) { stamp([a], o); await db.put('albums', a); const i = S.albums.findIndex(x => x.id === a.id); if (i >= 0) S.albums[i] = a; else S.albums.unshift(a); share(o, { albums: [a] }); }
+export async function savePerson(p, o = {}) { stamp([p], o); await db.put('people', p); const i = S.people.findIndex(x => x.id === p.id); if (i >= 0) S.people[i] = p; else { S.people.push(p); S.people.sort((a, b) => a.name.localeCompare(b.name, 'id')); } share(o, { people: [p] }); }
+export const personById = id => S.people.find(p => p.id === id);
 export async function saveMember(m, o = {}) { stamp([m], o); await db.put('members', m); const i = S.members.findIndex(x => x.id === m.id); if (i >= 0) S.members[i] = m; else S.members.push(m); share(o, { members: [m] }); }
 
 // Simple event bus: views subscribe to "change" to re-render.
@@ -219,7 +222,7 @@ export const on = (ev, fn) => (listeners[ev] ||= []).push(fn);
 export const emit = (ev, data) => (listeners[ev] || []).forEach(fn => fn(data));
 
 // ----------------------------- Log helper ----------------------------
-const LOG_ICON = { upload: 'upload', favorite: 'star', unfavorite: 'star', like: 'heart', unlike: 'heart', rename: 'edit', delete: 'trash', restore: 'restore', 'move-album': 'album', 'album-create': 'folder-plus', 'album-rename': 'edit', 'album-delete': 'trash', 'trash-empty': 'trash', 'backup-export': 'database', 'backup-import': 'database', pin: 'pin', unpin: 'pin', archive: 'archive', unarchive: 'archive', 'delete-forever': 'trash', 'edit-desc': 'tag', 'member-add': 'users', 'member-edit': 'user', 'member-delete': 'users', rotate: 'rotate' };
+const LOG_ICON = { upload: 'upload', favorite: 'star', unfavorite: 'star', like: 'heart', unlike: 'heart', rename: 'edit', delete: 'trash', restore: 'restore', 'move-album': 'album', 'album-create': 'folder-plus', 'album-rename': 'edit', 'album-delete': 'trash', 'trash-empty': 'trash', 'backup-export': 'database', 'backup-import': 'database', pin: 'pin', unpin: 'pin', archive: 'archive', unarchive: 'archive', 'delete-forever': 'trash', 'edit-desc': 'tag', 'member-add': 'users', 'member-edit': 'user', 'member-delete': 'users', rotate: 'rotate', 'person-add': 'user', 'person-delete': 'user' };
 export const logIcon = a => LOG_ICON[a] || 'activity';
 export async function addLog(action, text, extra = {}) {
   const m = S.member || {};

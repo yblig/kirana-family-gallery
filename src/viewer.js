@@ -20,6 +20,7 @@ export function openViewer(ids, index = 0, { mode = 'normal' } = {}) {
     <div class="v-bar v-top">
       <button class="v-btn" data-v="close" aria-label="Tutup">${icon('left')}</button>
       <div class="tt"><b></b><small></small></div>
+      <button class="v-btn" data-v="faces" aria-label="Tandai wajah">${icon('user')}</button>
       <button class="v-btn" data-v="info" aria-label="Info">${icon('info')}</button>
       <button class="v-btn" data-v="more" aria-label="Lainnya">${icon('more-v')}</button>
     </div>
@@ -257,6 +258,7 @@ async function act(a) {
     case 'restore': await A.restore([p.id]); dropCurrent(p.id); break;
     case 'forever': if (await A.deleteForever([p.id])) dropCurrent(p.id); break;
     case 'info': showInfo(p); break;
+    case 'faces': { if (p.unsupported) { toast('Format ini belum bisa dipindai'); break; } const { openFaceTagger } = await import('./faces.js'); await openFaceTagger(p); V && (V.dirty = true); paintBars(); break; }
     case 'more': moreMenu(p); break;
   }
 }
@@ -264,6 +266,7 @@ async function act(a) {
 function moreMenu(p) {
   const a = albumById(p.albumId);
   const items = [
+    { icon: 'user', label: 'Tandai wajah', sub: 'Beri nama orang di foto ini', fn: () => act('faces') },
     { icon: 'edit', label: 'Ganti nama', fn: async () => { if (await A.rename(p)) { V.dirty = true; paintBars(); } } },
     { icon: 'tag', label: 'Deskripsi & tag', fn: async () => { if (await A.editDescTags(p)) V.dirty = true; } },
     { icon: 'album', label: a ? `Pindah album (sekarang: ${a.name})` : 'Masukkan ke album', fn: async () => { await A.chooseAlbum([p.id]); V.dirty = true; } }
@@ -295,6 +298,7 @@ function showInfo(p) {
         ${isVideo(p) ? `<dt>Durasi</dt><dd>${fmtDur(p.duration)}</dd>` : ''}
         <dt>Tipe</dt><dd>${esc(p.type || '-')}</dd>
         <dt>Album</dt><dd>${a ? esc(a.name) : '—'}</dd>
+        <dt>Orang</dt><dd>${(() => { const ids = [...new Set((p.faces || []).map(f => f.pid).filter(Boolean))]; const names = ids.map(id => S.people.find(x => x.id === id)?.name).filter(Boolean); return names.length ? names.map(esc).join(', ') : (p.facesScanned ? '—' : 'Belum dipindai'); })()}</dd>
         <dt>Disukai</dt><dd>${likers.length ? likers.map(x => `${esc(x.emoji)} ${esc(x.name)}`).join(', ') : '—'}</dd>
         ${p.viewedAt ? `<dt>Dilihat</dt><dd>${fmtDateTime(p.viewedAt)}</dd>` : ''}
         <dt>Status</dt><dd>${[p.fav && '⭐ Favorit', p.pinned && '📌 Disematkan', p.archived && '🗄️ Diarsipkan', p.deleted && '🗑️ Di sampah'].filter(Boolean).join(' · ') || 'Normal'}</dd>
