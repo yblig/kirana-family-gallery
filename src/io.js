@@ -1,7 +1,7 @@
 // =====================================================================
 // io.js — Upload handler · Backup export/import (.kfg)
 // =====================================================================
-import { prepareMedia, guessType, ACCEPT, looksLikeMedia } from './media.js';
+import { prepareMedia, guessType, looksLikeMedia } from './media.js';
 import {
   S, $, esc, icon, uid, openModal, toast, sfx, db, savePhotos, saveAlbum, saveMember, addLog, emit, pickFiles,
   decodeImage, makeThumb, sha256, isNative, blobToDataURL, dataURLToBlob, saveBlob, writeChunks, shareUri, fmtSize,
@@ -10,9 +10,10 @@ import {
 const MAX_VIDEO = 1024 * 1024 * 1024; // 1 GB per video
 
 // ----------------------------- Upload --------------------------------
-export async function startUpload({ albumId = null } = {}) {
-  const { isIOS } = await import('./core.js');
-  const picked = await pickFiles('fileInput', { accept: isIOS ? 'image/*,video/*' : ACCEPT, multiple: true });
+// fromFiles=false → the phone's own Photos/Gallery picker (only plain image/video types do that);
+// fromFiles=true → file manager, for RAW/TIFF/other files not shown in the photo picker.
+export async function startUpload({ albumId = null, fromFiles = false } = {}) {
+  const picked = await pickFiles('fileInput', { accept: fromFiles ? '' : 'image/*,video/*', multiple: true });
   const files = picked.filter(looksLikeMedia);
   if (picked.length > files.length) toast(`${picked.length - files.length} file bukan foto/video dilewati`, { duration: 3500 });
   if (!files.length) return;

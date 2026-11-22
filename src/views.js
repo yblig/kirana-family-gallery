@@ -64,6 +64,7 @@ function renderSidebar() {
     ${NAV.map((n, i) => `${i === 4 || i === 7 ? '<div class="side-sep"></div>' : ''}<button class="side-item ${active === n.id ? 'active' : ''}" data-go="${n.id}">${icon(n.icon)}<span>${n.label}</span>${c[n.id] != null ? `<span class="count">${c[n.id]}</span>` : ''}</button>`).join('')}
     <div class="side-sep"></div>
     <button class="side-item" data-sync>${icon('users')}<span>Sinkron Keluarga</span></button>
+    <button class="side-item" data-upfiles>${icon('upload')}<span>Unggah dari File</span></button>
     <button class="side-item" data-surprise>${icon('gift')}<span>Kejutan!</span></button>
     <button class="side-item" data-lock>${icon('lock')}<span>Kunci Aplikasi</span></button>
     <div class="side-foot"><button class="member-chip" data-member style="width:100%;max-width:none">${avatarHTML(S.member, 'sm')}<span>${esc(S.member?.name || 'Pilih profil')}</span></button></div>`;
@@ -163,6 +164,7 @@ export function openMore() {
     { icon: 'chart', label: 'Statistik', color: 'yellow', fn: () => go('stats') },
     { icon: 'settings', label: 'Pengaturan', fn: () => go('settings') },
     { icon: 'users', label: 'Sinkron', color: 'green', fn: openFamilySync },
+    { icon: 'upload', label: 'Unggah dari File', color: 'yellow', fn: () => startUpload({ fromFiles: true }) },
     { icon: 'gift', label: 'Kejutan!', color: 'pink', fn: surprise },
     { icon: 'lock', label: 'Kunci Aplikasi', color: 'blue', fn: lockNow }
   ], { grid: true });
@@ -960,7 +962,7 @@ const VIEWS = {
 // Global click delegation for common data-* buttons
 export function bindChrome() {
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-go],[data-upload],[data-member],[data-more],[data-select],[data-newalbum],[data-back],[data-surprise],[data-lock],[data-sync]');
+    const t = e.target.closest('[data-go],[data-upload],[data-upfiles],[data-member],[data-more],[data-select],[data-newalbum],[data-back],[data-surprise],[data-lock],[data-sync]');
     if (!t) return;
     if (t.closest('.modal, .sheet')) return;
     sfx('tap');
@@ -974,6 +976,7 @@ export function bindChrome() {
     else if (t.hasAttribute('data-surprise')) surprise();
     else if (t.hasAttribute('data-lock')) lockNow();
     else if (t.hasAttribute('data-sync')) openFamilySync();
+    else if (t.hasAttribute('data-upfiles')) startUpload({ fromFiles: true });
   });
   on('change', () => { if (!viewerOpen()) render(); });
   on('member', () => render());
